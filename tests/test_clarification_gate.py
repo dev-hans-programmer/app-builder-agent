@@ -17,7 +17,9 @@ from src.graph import create_initial_state, ensure_workspace_layout
 
 
 class TestClarificationTemplate:
-    def test_create_clarification_template_writes_single_clarification_file(self, tmp_path):
+    def test_create_clarification_template_writes_single_clarification_file(
+        self, tmp_path
+    ):
         requirements = build_requirement_artifact("Build an API", "demo")
         manifest = ensure_workspace_layout(tmp_path)
 
@@ -39,15 +41,23 @@ class TestClarificationResponseLoading:
                     "job_id": "job-200",
                     "status": "answered",
                     "responses": [
-                        {"question": "Which database or persistence layer should be used?", "answer": "PostgreSQL"},
-                        {"question": "Should the backend include authentication and authorization?", "answer": "Yes"},
+                        {
+                            "question": "Which database or persistence layer should be used?",
+                            "answer": "PostgreSQL",
+                        },
+                        {
+                            "question": "Should the backend include authentication and authorization?",
+                            "answer": "Yes",
+                        },
                     ],
                 }
             ),
             encoding="utf-8",
         )
 
-        responses = load_clarification_responses(manifest["requirements_dir"], "job-200")
+        responses = load_clarification_responses(
+            manifest["requirements_dir"], "job-200"
+        )
 
         assert len(responses) == 2
         assert responses[0]["answer"] == "PostgreSQL"
@@ -57,7 +67,9 @@ class TestClarificationResponseLoading:
         clarification_json = Path(manifest["requirements_dir"]) / "clarification.json"
         clarification_json.write_text("{not valid json}", encoding="utf-8")
 
-        responses = load_clarification_responses(manifest["requirements_dir"], "job-201")
+        responses = load_clarification_responses(
+            manifest["requirements_dir"], "job-201"
+        )
 
         assert responses == []
 
@@ -94,12 +106,19 @@ class TestClarificationGate:
         assert result["job_status"] == "running"
         assert result["current_phase"] == "architecture_planning"
         assert result["requirements"]["needs_clarification"] is False
-        assert Path(result["requirements"]["artifact_paths"]["clarification_json"]).exists()
+        assert Path(
+            result["requirements"]["artifact_paths"]["clarification_json"]
+        ).exists()
 
-    def test_clarify_requirements_returns_running_when_no_open_questions(self, tmp_path):
+    def test_clarify_requirements_returns_running_when_no_open_questions(
+        self, tmp_path
+    ):
         state = create_initial_state("Build an API", "demo project")
         state["artifacts"] = ensure_workspace_layout(tmp_path)
-        state["requirements"] = build_requirement_artifact("Build a secure API with authentication, a database, and deployment.", "demo")
+        state["requirements"] = build_requirement_artifact(
+            "Build a secure API with authentication, a database, and deployment.",
+            "demo",
+        )
 
         result = clarify_requirements(state)
 
@@ -113,7 +132,9 @@ class TestClarificationGate:
         requirements["open_questions"] = ["Which database should be used?"]
         state["requirements"] = requirements
 
-        clarification_path = Path(state["artifacts"]["requirements_dir"]) / "clarification.json"
+        clarification_path = (
+            Path(state["artifacts"]["requirements_dir"]) / "clarification.json"
+        )
         clarification_path.write_text(
             json.dumps(
                 {
@@ -121,7 +142,9 @@ class TestClarificationGate:
                     "status": "answered",
                     "responses": [
                         {"question": question, "answer": f"answer-{index}"}
-                        for index, question in enumerate(requirements["open_questions"], start=1)
+                        for index, question in enumerate(
+                            requirements["open_questions"], start=1
+                        )
                     ],
                 }
             ),
@@ -135,9 +158,13 @@ class TestClarificationGate:
         assert result["requirements"]["clarification_answers"]
         assert result["requirements"]["needs_clarification"] is False
         assert result["requirements"]["open_questions"] == []
-        assert "answer-1" in Path(result["requirements"]["artifact_paths"]["requirements_markdown"]).read_text(encoding="utf-8")
+        assert "answer-1" in Path(
+            result["requirements"]["artifact_paths"]["requirements_markdown"]
+        ).read_text(encoding="utf-8")
 
-    def test_clarify_requirements_continues_with_partial_answers(self, tmp_path, monkeypatch):
+    def test_clarify_requirements_continues_with_partial_answers(
+        self, tmp_path, monkeypatch
+    ):
         state = create_initial_state("Build an API", "demo project")
         state["artifacts"] = ensure_workspace_layout(tmp_path)
         state["requirements"] = build_requirement_artifact("Build an API", "demo")

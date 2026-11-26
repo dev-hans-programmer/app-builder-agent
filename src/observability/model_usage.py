@@ -43,7 +43,9 @@ def _cached_tokens(usage: Any) -> int:
 
 def _reasoning_tokens(usage: Any) -> int:
     for name in ("completion_tokens_details", "output_tokens_details"):
-        details = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+        details = (
+            usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+        )
         if details is not None:
             return _usage_value(details, "reasoning_tokens")
     return 0

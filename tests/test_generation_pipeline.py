@@ -193,7 +193,17 @@ def test_production_quality_commands_are_pinned_to_generated_project(
         "--project",
         str(generated_root.resolve()),
     ]
-    for category in ("build", "format", "lint", "type", "test", "migration", "smoke"):
+    for category in (
+        "build",
+        "lint_apply",
+        "format_apply",
+        "format",
+        "lint",
+        "type",
+        "test",
+        "migration",
+        "smoke",
+    ):
         assert commands[category][:4] == [
             "/tools/uv",
             "run",
@@ -201,6 +211,23 @@ def test_production_quality_commands_are_pinned_to_generated_project(
             str(generated_root.resolve()),
         ]
     assert commands["container"] is None
+    assert commands["test"][-4:] == ["python", "-m", "pytest", "-q"]
+
+
+def test_quality_environment_isolated_and_container_has_safe_placeholder(
+    monkeypatch,
+):
+    monkeypatch.setenv("VIRTUAL_ENV", "/control-plane/.venv")
+    monkeypatch.setenv("DATABASE_PASSWORD", "do-not-forward")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "also-do-not-forward")
+
+    regular = quality_gate._safe_environment(category="test")
+    container = quality_gate._safe_environment(category="container")
+
+    assert "VIRTUAL_ENV" not in regular
+    assert "DATABASE_PASSWORD" not in regular
+    assert "POSTGRES_PASSWORD" not in regular
+    assert container["POSTGRES_PASSWORD"] == "app_builder_validation_only"
 
 
 def test_traceability_requires_contract_task_patch_and_quality_evidence():

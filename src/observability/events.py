@@ -35,6 +35,12 @@ _ACTIVE_STEP: contextvars.ContextVar[ActiveStep | None] = contextvars.ContextVar
     "active_observability_step",
     default=None,
 )
+_EVENT_SINK: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = (
+    contextvars.ContextVar("observability_event_sink", default=None)
+)
+_CANCELLATION_CHECKER: contextvars.ContextVar[Callable[[], bool] | None] = (
+    contextvars.ContextVar("run_cancellation_checker", default=None)
+)
 _SECRET_KEY = re.compile(
     r"(api[_-]?key|authorization|password|secret|(^|_)(access_token|refresh_token|resume_token|auth_token|token)$)",
     re.IGNORECASE,
@@ -61,6 +67,32 @@ class ActiveStep:
     input_artifacts: list[str]
     state: dict[str, Any]
     context_token: contextvars.Token[ActiveStep | None] | None = None
+
+
+class RunCancellationRequested(RuntimeError):
+    """Raised between workflow nodes after a durable cancellation request."""
+
+
+@contextmanager
+def use_event_sink(
+    sink: Callable[[dict[str, Any]], None],
+) -> Iterator[None]:
+    """Mirror normalized events to a process-local durable sink."""
+    token = _EVENT_SINK.set(sink)
+    try:
+        yield
+    finally:
+        _EVENT_SINK.reset(token)
+
+
+@contextmanager
+def use_cancellation_checker(checker: Callable[[], bool]) -> Iterator[None]:
+    """Cooperatively stop a queued run at the next node boundary."""
+    token = _CANCELLATION_CHECKER.set(checker)
+    try:
+        yield
+    finally:
+        _CANCELLATION_CHECKER.reset(token)
 
 
 def _utc_now() -> str:
@@ -165,10 +197,10 @@ def ensure_run_layout(state: dict[str, Any]) -> dict[str, str]:
         / "projects"
         / str(state.get("project_name") or "untitled-project")
     ).resolve()
-    run_dir = workspace_root / "runs" / run_id
-    machine_dir = run_dir / "_machine"
+    run_dir = Path(artifacts.get("run_dir") or workspace_root / "runs" / run_id)
+    machine_dir = Path(artifacts.get("machine_dir") or run_dir / "_machine")
     paths = {
-        "runs_dir": str(workspace_root / "runs"),
+        "runs_dir": str(artifacts.get("runs_dir") or workspace_root / "runs"),
         "run_dir": str(run_dir),
         "run_report_path": str(run_dir / "README.md"),
         "timeline_path": str(run_dir / "timeline.md"),
@@ -438,6 +470,9 @@ def append_event(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, A
             os.fsync(handle.fileno())
         summary = _update_summary(state, paths, normalized)
         write_run_views(state, paths, summary, _read_events(events_path))
+    sink = _EVENT_SINK.get()
+    if sink is not None:
+        sink(redact(normalized))
     return normalized
 
 
@@ -1032,6 +1067,18 @@ def instrument_node(
 
     @wraps(node)
     def observed(state: dict[str, Any]) -> Any:
+        cancellation_checker = _CANCELLATION_CHECKER.get()
+        if cancellation_checker is not None and cancellation_checker():
+            append_event(
+                state,
+                {
+                    "event_type": "run_cancelled",
+                    "step_id": step_id,
+                    "status": "cancelled",
+                    "message": "Run stopped at a workflow node boundary",
+                },
+            )
+            raise RunCancellationRequested("Run cancellation requested")
         active = _start_step(state, step_id, parent_step_id)
         try:
             result = node(state)

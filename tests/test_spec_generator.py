@@ -39,7 +39,9 @@ class TestSpecTreeGeneration:
         assert spec_tree["specs"][0]["tasks"]
 
     def test_render_spec_tree_markdown_contains_hierarchy(self):
-        requirements = build_requirement_artifact("Build API with auth and database", "demo")
+        requirements = build_requirement_artifact(
+            "Build API with auth and database", "demo"
+        )
         architecture = build_architecture_artifact(requirements, "demo")
         spec_tree = build_spec_tree(requirements, architecture, "demo")
 
@@ -69,7 +71,9 @@ class TestSpecTreeGeneration:
 
 class TestSpecTreePersistence:
     def test_persist_spec_tree_artifacts_writes_files(self, tmp_path):
-        requirements = build_requirement_artifact("Build API with auth and database", "demo")
+        requirements = build_requirement_artifact(
+            "Build API with auth and database", "demo"
+        )
         architecture = build_architecture_artifact(requirements, "demo")
         spec_tree = build_spec_tree(requirements, architecture, "demo")
         manifest = ensure_workspace_layout(tmp_path)
@@ -82,7 +86,9 @@ class TestSpecTreePersistence:
         spec_folder = Path(spec_tree["specs"][0]["artifact_paths"]["folder"])
         spec_markdown = Path(spec_tree["specs"][0]["artifact_paths"]["spec_markdown"])
         tasks_markdown = Path(spec_tree["specs"][0]["artifact_paths"]["tasks_markdown"])
-        prompt_markdown = Path(spec_tree["specs"][0]["artifact_paths"]["prompt_markdown"])
+        prompt_markdown = Path(
+            spec_tree["specs"][0]["artifact_paths"]["prompt_markdown"]
+        )
 
         assert json_path.exists()
         assert md_path.exists()
@@ -235,8 +241,12 @@ class TestGenerateSpecs:
     def test_generate_specs_updates_state(self, tmp_path):
         state = create_initial_state("Build API with auth and database", "Demo Project")
         state["artifacts"] = ensure_workspace_layout(tmp_path)
-        state["requirements"] = build_requirement_artifact("Build API with auth and database", "demo-project")
-        state["architecture_plan"] = build_architecture_artifact(state["requirements"], "demo-project")
+        state["requirements"] = build_requirement_artifact(
+            "Build API with auth and database", "demo-project"
+        )
+        state["architecture_plan"] = build_architecture_artifact(
+            state["requirements"], "demo-project"
+        )
 
         result = generate_specs(state)
 
@@ -246,4 +256,6 @@ class TestGenerateSpecs:
         assert Path(result["spec_tree"]["artifact_paths"]["spec_tree_json"]).exists()
         assert result["spec_tree"]["validation_errors"] == []
         assert result["spec_tree"]["specs"][0]["artifact_paths"]["spec_markdown"]
-        assert Path(result["spec_tree"]["specs"][0]["artifact_paths"]["prompt_markdown"]).exists()
+        assert Path(
+            result["spec_tree"]["specs"][0]["artifact_paths"]["prompt_markdown"]
+        ).exists()

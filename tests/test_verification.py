@@ -45,11 +45,48 @@ def _build_executed_state(tmp_path):
 class TestFailureClassification:
     def test_classify_failure_categories(self):
         assert classify_failure({"status": "passed"}) == "none"
-        assert classify_failure({"status": "failed", "spec_id": "", "missing_artifacts": []}) == "blocked-by-missing-input"
-        assert classify_failure({"status": "failed", "spec_id": "x", "missing_artifacts": ["summary.json"]}) == "local"
-        assert classify_failure({"status": "failed", "spec_id": "x", "missing_artifacts": ["trace.json"]}) == "environment-related"
-        assert classify_failure({"status": "failed", "spec_id": "x", "missing_artifacts": ["checkpoint.json"]}) == "cascading"
-        assert classify_failure({"status": "failed", "spec_id": "x", "missing_artifacts": ["other"]}) == "local"
+        assert (
+            classify_failure(
+                {"status": "failed", "spec_id": "", "missing_artifacts": []}
+            )
+            == "blocked-by-missing-input"
+        )
+        assert (
+            classify_failure(
+                {
+                    "status": "failed",
+                    "spec_id": "x",
+                    "missing_artifacts": ["summary.json"],
+                }
+            )
+            == "local"
+        )
+        assert (
+            classify_failure(
+                {
+                    "status": "failed",
+                    "spec_id": "x",
+                    "missing_artifacts": ["trace.json"],
+                }
+            )
+            == "environment-related"
+        )
+        assert (
+            classify_failure(
+                {
+                    "status": "failed",
+                    "spec_id": "x",
+                    "missing_artifacts": ["checkpoint.json"],
+                }
+            )
+            == "cascading"
+        )
+        assert (
+            classify_failure(
+                {"status": "failed", "spec_id": "x", "missing_artifacts": ["other"]}
+            )
+            == "local"
+        )
 
 
 class TestVerificationResult:
@@ -97,8 +134,12 @@ class TestVerifyAndRepair:
 
     def test_repair_execution_repairs_missing_summary_and_reverifies(self, tmp_path):
         state = _build_executed_state(tmp_path)
-        summary_json = Path(tmp_path) / "execution" / state["current_spec_id"] / "summary.json"
-        summary_md = Path(tmp_path) / "execution" / state["current_spec_id"] / "summary.md"
+        summary_json = (
+            Path(tmp_path) / "execution" / state["current_spec_id"] / "summary.json"
+        )
+        summary_md = (
+            Path(tmp_path) / "execution" / state["current_spec_id"] / "summary.md"
+        )
         summary_json.unlink()
         summary_md.unlink()
 
@@ -115,7 +156,9 @@ class TestVerifyAndRepair:
         state = _build_executed_state(tmp_path)
         trace_json = Path(tmp_path) / "plans" / "execution-trace.json"
         trace_md = Path(tmp_path) / "plans" / "execution-trace.md"
-        checkpoint_path = Path(tmp_path) / "checkpoints" / f"{state['current_spec_id']}.json"
+        checkpoint_path = (
+            Path(tmp_path) / "checkpoints" / f"{state['current_spec_id']}.json"
+        )
         trace_json.unlink()
         trace_md.unlink()
         checkpoint_path.unlink()
@@ -131,7 +174,9 @@ class TestVerifyAndRepair:
     def test_repair_execution_handles_missing_spec(self, tmp_path):
         state = create_initial_state("Build API", "demo")
         state["artifacts"] = ensure_workspace_layout(tmp_path)
-        state["verification_results"] = [{"status": "failed", "spec_id": "", "missing_artifacts": []}]
+        state["verification_results"] = [
+            {"status": "failed", "spec_id": "", "missing_artifacts": []}
+        ]
 
         result = repair_execution(state)
 

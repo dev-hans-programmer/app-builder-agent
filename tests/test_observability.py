@@ -122,16 +122,21 @@ def test_single_stack_workflow_records_end_to_end_trace(tmp_path, monkeypatch):
     assert state["resume_token"] not in readable_content
 
     summary = json.loads(Path(final_state["artifacts"]["run_summary_path"]).read_text())
-    assert summary["status"] == "completed"
+    assert summary["status"] == "failed"
     assert summary["event_count"] == len(events)
     assert any(item["step_id"] == "python_builder" for item in summary["action_items"])
-    assert "Python Builder" in Path(final_state["artifacts"]["timeline_path"]).read_text()
-    assert "What needs attention" in Path(final_state["artifacts"]["run_report_path"]).read_text()
+    assert (
+        "Python Builder" in Path(final_state["artifacts"]["timeline_path"]).read_text()
+    )
+    assert (
+        "What needs attention"
+        in Path(final_state["artifacts"]["run_report_path"]).read_text()
+    )
 
     final_checkpoint = json.loads(
         Path(final_state["final_checkpoint_path"]).read_text()
     )
-    assert final_checkpoint["job_status"] == "completed"
+    assert final_checkpoint["job_status"] == "failed"
     assert final_checkpoint["current_phase"] == "completed"
 
     manifest = json.loads(
@@ -162,9 +167,7 @@ def test_instrumented_failure_records_diagnostics(tmp_path, monkeypatch):
     error_log = next(
         Path(state["artifacts"]["steps_dir"]).glob("*-failing-node-error.log")
     )
-    step_report = next(
-        Path(state["artifacts"]["steps_dir"]).glob("*-failing-node.md")
-    )
+    step_report = next(Path(state["artifacts"]["steps_dir"]).glob("*-failing-node.md"))
     assert error_log.exists()
     assert "Recommended action" in step_report.read_text()
     summary = json.loads(Path(state["artifacts"]["run_summary_path"]).read_text())
@@ -252,9 +255,15 @@ def test_model_backed_step_records_response_usage_and_generated_files(
     response = SimpleNamespace(
         id="request-42",
         model="test-model",
-        choices=[SimpleNamespace(message=SimpleNamespace(content="""```filename: main.py
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="""```filename: main.py
 print(\"hello\")
-```"""))],
+```"""
+                )
+            )
+        ],
         usage=SimpleNamespace(
             prompt_tokens=50,
             completion_tokens=10,

@@ -236,6 +236,28 @@ def apply_file_patches(output_dir: str | Path, files: dict[str, str]) -> list[di
     return patches
 
 
+def ensure_production_package_scaffold(output_dir: str | Path) -> list[dict]:
+    """Create required package markers that do not need model judgment."""
+    root = Path(output_dir)
+    package_directories = (
+        "app/api/routes",
+        "app/api/dependencies",
+        "app/core",
+        "app/domain",
+        "app/application",
+        "app/infrastructure/database",
+        "app/infrastructure/repositories",
+        "app/schemas",
+        "app/middleware",
+    )
+    missing = {
+        f"{directory}/__init__.py": ""
+        for directory in package_directories
+        if not (root / directory / "__init__.py").is_file()
+    }
+    return apply_file_patches(root, missing) if missing else []
+
+
 def read_project_files(
     output_dir: str | Path,
     *,
@@ -712,6 +734,18 @@ def build(state: BuilderState) -> dict:
                 validate_generation_metadata(response_metadata, task)
             validate_task_file_scope(files, task)
             patches = apply_file_patches(output_dir, files)
+            if task.get("kind") == "foundation" and (
+                state.get("backend_policy") or {}
+            ).get("enabled"):
+                scaffold_patches = ensure_production_package_scaffold(output_dir)
+                patches.extend(scaffold_patches)
+                files.update(
+                    {
+                        patch["path"]: ""
+                        for patch in scaffold_patches
+                        if patch["operation"] == "created"
+                    }
+                )
             all_paths.extend(files)
             task_runs.append(
                 {

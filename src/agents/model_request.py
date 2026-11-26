@@ -33,9 +33,7 @@ def chat_completion_options(model: str) -> dict[str, Any]:
         effort = os.getenv("OPENAI_REASONING_EFFORT", "low").strip().lower()
         if effort not in _REASONING_EFFORTS:
             supported = ", ".join(sorted(_REASONING_EFFORTS))
-            raise ValueError(
-                f"OPENAI_REASONING_EFFORT must be one of: {supported}"
-            )
+            raise ValueError(f"OPENAI_REASONING_EFFORT must be one of: {supported}")
         options["reasoning_effort"] = effort
     return options
 

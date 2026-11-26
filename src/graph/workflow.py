@@ -25,7 +25,9 @@ def _terminal_job_status(state: BuilderState) -> str:
     if target_stack in {"nodejs", "both"}:
         selected_outputs.append(state.get("nodejs_output") or {})
 
-    if any(output.get("status") == "failed" for output in selected_outputs):
+    if not selected_outputs or any(
+        output.get("status") != "success" for output in selected_outputs
+    ):
         return "failed"
 
     quality = state.get("quality_results") or {}
@@ -276,7 +278,9 @@ def comparison_placeholder(state: BuilderState) -> dict:
     }
 
 
-def create_workflow() -> StateGraph:
+def create_workflow(
+    *, checkpointer=None, interrupt_after: list[str] | None = None
+) -> StateGraph:
     """
     Create and compile the LangGraph workflow.
 
@@ -452,4 +456,7 @@ def create_workflow() -> StateGraph:
     workflow.add_edge("generate_report", END)
 
     # Compile and return
-    return workflow.compile()
+    return workflow.compile(
+        checkpointer=checkpointer,
+        interrupt_after=interrupt_after,
+    )

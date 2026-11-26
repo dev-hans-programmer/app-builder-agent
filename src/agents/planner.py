@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from pathlib import Path
+import re
 from typing import Any, Dict
 
 from src.graph.runtime import ensure_workspace_layout, persist_job_checkpoint
@@ -181,6 +182,40 @@ def _build_executable_tasks(
     return tasks
 
 
+def _task_key(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return normalized[:80] or "core"
+
+
+def _criterion_resource_keys(architecture: Dict[str, Any]) -> dict[str, str]:
+    """Map criteria to a stable resource using their approved contracts."""
+    candidates: dict[str, list[str]] = defaultdict(list)
+    for contract in architecture.get("data_contracts", []):
+        key = _task_key(str(contract.get("entity") or contract.get("id") or "core"))
+        for criterion_id in contract.get("acceptance_criteria_ids", []):
+            candidates[str(criterion_id)].append(key)
+    for contract in architecture.get("api_contracts", []):
+        path = str(contract.get("path") or "")
+        segments = [
+            segment
+            for segment in path.split("/")
+            if segment and segment not in {"api", "v1"} and not segment.startswith("{")
+        ]
+        operation = str(contract.get("operation") or contract.get("id") or "core")
+        key = _task_key(segments[0] if segments else operation)
+        for criterion_id in contract.get("acceptance_criteria_ids", []):
+            candidates[str(criterion_id)].append(key)
+    return {
+        criterion_id: sorted(keys, key=lambda item: (item == "core", item))[0]
+        for criterion_id, keys in candidates.items()
+        if keys
+    }
+
+
+def _chunks(items: list[Dict[str, Any]], size: int) -> list[list[Dict[str, Any]]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
 def _build_python_production_tasks(
     requirements: Dict[str, Any],
     architecture: Dict[str, Any],
@@ -205,11 +240,6 @@ def _build_python_production_tasks(
         if item.get("id")
         and any(term in str(item.get("requirement", "")).lower() for term in auth_terms)
     ]
-    feature_ids = [
-        criterion_id for criterion_id in all_ids if criterion_id not in auth_ids
-    ]
-    if not feature_ids:
-        feature_ids = all_ids
     contracts = [
         *architecture.get("api_contracts", []),
         *architecture.get("data_contracts", []),
@@ -224,6 +254,7 @@ def _build_python_production_tasks(
 
     definitions: list[Dict[str, Any]] = [
         {
+            "task_key": "foundation",
             "kind": "foundation",
             "title": "Create the production project foundation",
             "objective": "Create the policy-compliant package structure, pyproject, developer tooling, and explicit dependency boundaries.",
@@ -241,6 +272,7 @@ def _build_python_production_tasks(
             ],
         },
         {
+            "task_key": "platform",
             "kind": "platform",
             "title": "Implement the production platform foundation",
             "objective": "Implement typed configuration, transport-independent errors, async PostgreSQL access, Alembic, repositories, logging, telemetry, metrics, and health semantics.",
@@ -263,6 +295,7 @@ def _build_python_production_tasks(
     if auth_ids:
         definitions.append(
             {
+                "task_key": "authentication",
                 "kind": "authentication",
                 "title": "Implement authentication and authorization as a vertical slice",
                 "objective": "Implement user persistence, registration, login, caller identity, authorization, versioned API routes, schemas, and focused security tests without leaking HTTP into application/domain code.",
@@ -281,44 +314,73 @@ def _build_python_production_tasks(
                 ],
             }
         )
-    definitions.append(
-        {
-            "kind": "feature",
-            "title": "Implement the requested business capabilities as vertical slices",
-            "objective": "Implement every remaining approved capability end to end across domain, use cases, repository adapters, API contracts, migrations, and targeted tests.",
-            "acceptance_criteria_ids": feature_ids,
-            "contract_ids": contract_ids(feature_ids),
-            "policy_sections": [
-                2,
-                5,
-                6,
-                7,
-                8,
-                9,
-                10,
-                11,
-                12,
-                21,
-                22,
-                23,
-                28,
-                29,
-                30,
-                35,
-            ],
-            "allowed_paths": [
-                "app/domain/",
-                "app/application/",
-                "app/infrastructure/",
-                "app/api/",
-                "app/schemas/",
-                "alembic/versions/",
-                "tests/",
-            ],
-        }
+
+    feature_criteria = [
+        item for item in criteria if item.get("id") and item["id"] not in set(auth_ids)
+    ]
+    resource_for_criterion = _criterion_resource_keys(architecture)
+    grouped: dict[str, list[Dict[str, Any]]] = defaultdict(list)
+    fallback_resource = _task_key(
+        str((architecture.get("primary_entities") or ["core"])[0])
     )
+    for criterion in feature_criteria:
+        grouped[
+            resource_for_criterion.get(str(criterion["id"]), fallback_resource)
+        ].append(criterion)
+
+    feature_index = 0
+    for resource, resource_criteria in grouped.items():
+        for chunk in _chunks(resource_criteria, 3):
+            feature_index += 1
+            criterion_ids = [str(item["id"]) for item in chunk]
+            capability_summary = "; ".join(
+                str(item.get("requirement") or item["id"]) for item in chunk
+            )
+            definitions.append(
+                {
+                    "task_key": f"feature-{resource}-{feature_index:02d}",
+                    "kind": "feature",
+                    "title": f"Implement {resource.replace('-', ' ')} capabilities",
+                    "objective": (
+                        "Implement this bounded vertical slice end to end across "
+                        "domain, application, persistence, API, migrations, and tests: "
+                        f"{capability_summary}"
+                    ),
+                    "acceptance_criteria_ids": criterion_ids,
+                    "contract_ids": contract_ids(criterion_ids),
+                    "policy_sections": [
+                        2,
+                        5,
+                        6,
+                        7,
+                        8,
+                        9,
+                        10,
+                        11,
+                        12,
+                        21,
+                        22,
+                        23,
+                        28,
+                        29,
+                        30,
+                        35,
+                    ],
+                    "allowed_paths": [
+                        "app/domain/",
+                        "app/application/",
+                        "app/infrastructure/",
+                        "app/api/",
+                        "app/schemas/",
+                        "alembic/versions/",
+                        "tests/",
+                    ],
+                }
+            )
+
     definitions.append(
         {
+            "task_key": "delivery",
             "kind": "delivery",
             "title": "Complete production operations and delivery",
             "objective": "Complete application composition, Docker, Compose, CI, pre-commit, documentation, production checks, and missing tests; remove placeholders and policy violations.",
@@ -358,19 +420,32 @@ def _build_python_production_tasks(
     )
 
     tasks: list[Dict[str, Any]] = []
-    previous: str | None = None
     for index, definition in enumerate(definitions, start=1):
         task_id = f"PY-TASK-{index:03d}"
+        if definition["task_key"] == "foundation":
+            dependencies: list[str] = []
+        elif definition["task_key"] == "platform":
+            dependencies = ["PY-TASK-001"]
+        elif definition["task_key"] == "delivery":
+            dependencies = [
+                task["id"] for task in tasks if task["kind"] != "foundation"
+            ]
+        else:
+            platform = next(
+                task["id"] for task in tasks if task["task_key"] == "platform"
+            )
+            dependencies = [platform]
         tasks.append(
             {
                 "id": task_id,
+                "task_key": definition["task_key"],
                 "order": index,
                 "stack": "python",
                 "module": definition["kind"],
                 "kind": definition["kind"],
                 "title": definition["title"],
                 "objective": definition["objective"],
-                "dependencies": [previous] if previous else [],
+                "dependencies": dependencies,
                 "acceptance_criteria_ids": definition["acceptance_criteria_ids"],
                 "contract_ids": definition["contract_ids"],
                 "policy_rule_ids": [
@@ -387,9 +462,10 @@ def _build_python_production_tasks(
                     "smoke",
                 ],
                 "status": "ready",
+                "weight": 1.0,
+                "max_attempts": 3,
             }
         )
-        previous = task_id
     return tasks
 
 
@@ -422,6 +498,12 @@ def build_execution_plan(
         "tasks": tasks,
         "python_tasks": python_tasks,
         "ordered_python_tasks": [task["id"] for task in python_tasks],
+        "python_task_strategy": "dynamic-v1",
+        "acceptance_criteria_ids": [
+            str(item["id"])
+            for item in (requirements or {}).get("acceptance_criteria", [])
+            if item.get("id")
+        ],
         "dependency_graph": dependency_graph,
         "parallel_groups": parallel_groups,
         "checkpoints": checkpoints,
@@ -540,6 +622,46 @@ def validate_execution_plan(
     for group in plan.get("parallel_groups", []):
         if len(group) != len(set(group)):
             errors.append("Parallel groups cannot contain duplicate spec ids.")
+
+    python_tasks = list(plan.get("python_tasks", []))
+    task_ids = [str(task.get("id")) for task in python_tasks]
+    task_keys = [str(task.get("task_key")) for task in python_tasks]
+    known_ids = set(task_ids)
+    if len(task_ids) != len(known_ids):
+        errors.append("Python task ids must be unique.")
+    if len(task_keys) != len(set(task_keys)):
+        errors.append("Python task keys must be unique.")
+    task_graph = {
+        str(task.get("id")): [str(item) for item in task.get("dependencies", [])]
+        for task in python_tasks
+    }
+    for task_id, dependencies in task_graph.items():
+        unknown = [
+            dependency for dependency in dependencies if dependency not in known_ids
+        ]
+        if unknown:
+            errors.append(
+                f"Python task {task_id} has unknown dependencies: {', '.join(unknown)}."
+            )
+        if task_id in dependencies:
+            errors.append(f"Python task {task_id} cannot depend on itself.")
+    if _detect_cycle(task_graph):
+        errors.append("Python task dependency graph contains a cycle.")
+
+    approved_ids = (
+        set(plan.get("acceptance_criteria_ids", [])) if python_tasks else set()
+    )
+    if approved_ids:
+        covered_ids = {
+            str(criterion_id)
+            for task in python_tasks
+            for criterion_id in task.get("acceptance_criteria_ids", [])
+        }
+        missing = sorted(approved_ids - covered_ids)
+        if missing:
+            errors.append(
+                "Python tasks do not cover acceptance criteria: " + ", ".join(missing)
+            )
 
     return errors
 

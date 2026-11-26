@@ -8,6 +8,7 @@ and end-to-end workflow execution.
 import json
 import pytest
 from pathlib import Path
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from src.graph import (
     BuilderState,
@@ -150,7 +151,9 @@ class TestGenerateReportNode:
         result = generate_report_node(state)
         assert result is not None
         assert result["delivery_summary_markdown"]
-        assert not list(Path(result["artifacts"]["reports_dir"]).glob("comparison-*.md"))
+        assert not list(
+            Path(result["artifacts"]["reports_dir"]).glob("comparison-*.md")
+        )
 
     def test_preserves_builder_failure_as_terminal_status(self, tmp_path):
         state = create_initial_state(
@@ -209,7 +212,10 @@ class TestWorkflowExecution:
         final_state = workflow.invoke(state)
 
         # Verify state fields are present
-        assert final_state["user_prompt"] == "Build a secure API with authentication, a database, and deployment."
+        assert (
+            final_state["user_prompt"]
+            == "Build a secure API with authentication, a database, and deployment."
+        )
         assert final_state["project_name"] == "test-project"
         assert "python_output" in final_state
         assert "nodejs_output" in final_state
@@ -219,7 +225,7 @@ class TestWorkflowExecution:
         assert "verification_results" in final_state
         assert "repair_history" in final_state
         assert "spec_tree" in final_state
-        assert final_state["job_status"] == "completed"
+        assert final_state["job_status"] == "failed"
 
     def test_state_flows_through_all_nodes(self, monkeypatch):
         """Test that state flows through all nodes."""
@@ -326,7 +332,7 @@ class TestWorkflowExecution:
         assert final_state[omitted_output] is None
         assert final_state["comparison_report"] is None
         assert final_state["target_stack"] == target_stack
-        assert final_state["job_status"] == "completed"
+        assert final_state["job_status"] == "failed"
 
     def test_workflow_does_not_generate_generic_clarification_questions(
         self, monkeypatch
@@ -343,7 +349,7 @@ class TestWorkflowExecution:
 
         final_state = workflow.invoke(state)
 
-        assert final_state["job_status"] == "completed"
+        assert final_state["job_status"] == "failed"
         assert final_state["requirements"]["open_questions"] == []
         assert final_state["requirements"]["needs_clarification"] is False
 
@@ -358,7 +364,7 @@ class TestWorkflowExecution:
 
         final_state = workflow.invoke(state)
 
-        assert final_state["job_status"] == "completed"
+        assert final_state["job_status"] == "failed"
         assert final_state["clarification_gate_enabled"] is False
         assert final_state["current_phase"] == "completed"
         assert final_state["spec_tree"] is not None
@@ -370,7 +376,9 @@ class TestWorkflowExecution:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         state = create_initial_state("Build API", "resume-project")
         requirements = build_requirement_artifact("Build API", "resume-project")
-        state["artifacts"] = state["artifacts"] | {"workspace_root": str(tmp_path.resolve())}
+        state["artifacts"] = state["artifacts"] | {
+            "workspace_root": str(tmp_path.resolve())
+        }
         state["artifacts"] = {
             **state["artifacts"],
             "requirements_dir": str(tmp_path / "requirements"),
@@ -398,7 +406,9 @@ class TestWorkflowExecution:
         ):
             (tmp_path / directory).mkdir(parents=True, exist_ok=True)
 
-        response_path = Path(state["artifacts"]["requirements_dir"]) / "clarification.json"
+        response_path = (
+            Path(state["artifacts"]["requirements_dir"]) / "clarification.json"
+        )
         response_path.write_text(
             json.dumps(
                 {
@@ -406,7 +416,9 @@ class TestWorkflowExecution:
                     "status": "answered",
                     "responses": [
                         {"question": question, "answer": f"answer-{index}"}
-                        for index, question in enumerate(requirements["open_questions"], start=1)
+                        for index, question in enumerate(
+                            requirements["open_questions"], start=1
+                        )
                     ],
                 }
             ),
@@ -416,7 +428,7 @@ class TestWorkflowExecution:
         workflow = create_workflow()
         final_state = workflow.invoke(state)
 
-        assert final_state["job_status"] == "completed"
+        assert final_state["job_status"] == "failed"
         assert final_state["spec_tree"] is not None
         assert final_state["execution_plan"] is not None
         assert final_state["execution_trace"] is not None
@@ -424,3 +436,45 @@ class TestWorkflowExecution:
         assert final_state["repair_history"] is not None
         assert not final_state["requirements"].get("clarification_answers")
         assert final_state["requirements"]["open_questions"] == []
+
+
+def test_dynamic_workflow_pauses_after_planning_and_can_skip_builder(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("REQUIREMENTS_MODEL_ENABLED", "false")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    state = create_initial_state(
+        "Build catalog create, update, list, and delete endpoints",
+        "dynamic-catalog",
+        target_stack="python",
+        clarification_gate_enabled=False,
+        workspace_root=tmp_path,
+    )
+    config = {"configurable": {"thread_id": "dynamic-catalog"}}
+    checkpointer = MemorySaver()
+    planning_graph = create_workflow(
+        checkpointer=checkpointer,
+        interrupt_after=["planning"],
+    )
+
+    planned = planning_graph.invoke(state, config=config)
+
+    assert planned["execution_plan"]["python_task_strategy"] == "dynamic-v1"
+    assert planning_graph.get_state(config).next == ("generation_start",)
+
+    finalization_graph = create_workflow(checkpointer=checkpointer)
+    finalization_graph.update_state(
+        config,
+        {
+            "python_output": {
+                "status": "success",
+                "output_dir": str(tmp_path / "builds/python"),
+                "files_created": [],
+                "patches": [],
+                "task_runs": [],
+            },
+            "job_status": "running",
+        },
+        as_node="python_builder",
+    )
+    assert finalization_graph.get_state(config).next == ("quality_gate",)

@@ -4,8 +4,9 @@ This document describes the implemented architecture of `app-builder-agent`.
 
 ## Overview
 
-The project is a CLI-driven LangGraph workflow that turns one submitted backend requirement into
-one or two verified implementations:
+The project has two entry points over the same LangGraph generation workflow: the original CLI and
+a durable FastAPI control plane. It turns one submitted backend requirement into one or two verified
+implementations:
 
 - Python with FastAPI
 - Node.js with Express
@@ -81,8 +82,8 @@ delivery.
 ## State and Persistence
 
 `BuilderState` carries normalized artifacts, selected stack outputs, quality history, repair
-history, traceability results, and durable job metadata. Checkpoints are written after the major
-planning and gate transitions so a future queue worker can resume durable jobs.
+history, traceability results, and durable job metadata. CLI runs retain filesystem checkpoints.
+Queued runs use LangGraph's async PostgreSQL checkpointer with the run ID as the thread ID.
 
 Project artifacts live under `projects/<project>/`:
 
@@ -106,5 +107,7 @@ Every graph node is instrumented. `runs/<run_id>/events.jsonl` is the append-onl
 prompt version/hash, token use, estimated cost when rates are configured, task prompts/responses,
 input/output artifacts, hashes, retry reasons, and error diagnostics.
 
-The observability and checkpoint boundaries are designed so queue-backed execution can be added
-without changing generation semantics or artifact formats.
+API runs additionally mirror every event and step attempt into PostgreSQL. RabbitMQ/Celery provides
+at-least-once delivery, a transactional outbox prevents database/broker gaps, worker leases recover
+lost executions, and SSE provides cursor-based live replay. See
+[Durable Control-Plane Architecture](control-plane-architecture.md).

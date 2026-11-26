@@ -26,13 +26,18 @@ from src.agents.policy_compliance import (
 CHECK_TIMEOUT_SECONDS = 180
 
 
-def _safe_environment() -> dict[str, str]:
+def _safe_environment(*, category: str) -> dict[str, str]:
     blocked = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
-    return {
+    environment = {
         key: value
         for key, value in os.environ.items()
-        if not any(marker in key.upper() for marker in blocked)
+        if key != "VIRTUAL_ENV" and not any(marker in key.upper() for marker in blocked)
     }
+    if category == "container":
+        # Compose interpolation needs a non-secret value for static validation.
+        # Never forward the control plane's actual database password.
+        environment["POSTGRES_PASSWORD"] = "app_builder_validation_only"
+    return environment
 
 
 def _run_check(
@@ -65,7 +70,7 @@ def _run_check(
         result = subprocess.run(
             command,
             cwd=cwd,
-            env=_safe_environment(),
+            env=_safe_environment(category=category),
             capture_output=True,
             text=True,
             timeout=CHECK_TIMEOUT_SECONDS,
@@ -138,6 +143,18 @@ def _python_commands(
                 "uv is not installed",
             ),
             (
+                "lint_apply",
+                [*uv_run, "ruff", "check", "--fix", "."] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
+                "format_apply",
+                [*uv_run, "ruff", "format", "."] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
                 "format",
                 [*uv_run, "ruff", "format", "--check", "."] if uv else None,
                 True,
@@ -157,7 +174,7 @@ def _python_commands(
             ),
             (
                 "test",
-                [*uv_run, "pytest", "-q"] if uv else None,
+                [*uv_run, "python", "-m", "pytest", "-q"] if uv else None,
                 True,
                 "uv is not installed",
             ),
@@ -173,7 +190,11 @@ def _python_commands(
                     *uv_run,
                     "python",
                     "-c",
-                    "from app.main import app; assert app is not None",
+                    (
+                        "import app.main as main; "
+                        "assert getattr(main, 'app', None) is not None "
+                        "or callable(getattr(main, 'create_app', None))"
+                    ),
                 ]
                 if uv
                 else None,

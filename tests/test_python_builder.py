@@ -11,9 +11,22 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from src.agents import python_builder
-from src.agents.python_builder import parse_code_blocks, write_files
+from src.agents.python_builder import (
+    ensure_production_package_scaffold,
+    parse_code_blocks,
+    write_files,
+)
 from src.graph import create_initial_state, ensure_workspace_layout
 from src.prompts.python_builder_prompt import create_python_prompt
+
+
+def test_production_scaffold_creates_required_package_markers(tmp_path):
+    patches = ensure_production_package_scaffold(tmp_path)
+
+    assert (tmp_path / "app/api/dependencies/__init__.py").is_file()
+    assert (tmp_path / "app/infrastructure/repositories/__init__.py").is_file()
+    assert all(patch["operation"] == "created" for patch in patches)
+    assert ensure_production_package_scaffold(tmp_path) == []
 
 
 class TestParseCodeBlocks:
