@@ -16,6 +16,39 @@ from src.graph import create_initial_state, ensure_workspace_layout
 
 
 class TestArchitectureArtifact:
+    def test_retrieve_individual_resource_creates_get_contract(self):
+        requirements = {
+            "id": "movie-requirements",
+            "summary": "Create, retrieve, update, delete, and list movies.",
+            "functional_requirements": [
+                "Create a movie using a POST endpoint.",
+                "Retrieve an individual movie.",
+                "Update an existing movie.",
+                "Delete an existing movie.",
+                "List movies.",
+            ],
+            "acceptance_criteria": [
+                {"id": "AC-001", "requirement": "Create a movie."},
+                {"id": "AC-002", "requirement": "Retrieve an individual movie."},
+                {"id": "AC-003", "requirement": "Update an existing movie."},
+                {"id": "AC-004", "requirement": "Delete an existing movie."},
+                {"id": "AC-005", "requirement": "List movies."},
+            ],
+            "domain_entities": ["movie"],
+            "non_functional_requirements": [],
+            "constraints": [],
+            "complexity": "simple",
+        }
+
+        architecture = build_architecture_artifact(requirements, "movie")
+
+        retrieve_contract = next(
+            contract
+            for contract in architecture["api_contracts"]
+            if contract["method"] == "GET" and contract["path"].endswith("/{id}")
+        )
+        assert retrieve_contract["acceptance_criteria_ids"] == ["AC-002"]
+
     def test_build_architecture_artifact_with_database_and_auth(self):
         requirements = build_requirement_artifact(
             "Build a secure API with authentication, database access, logging, and websocket updates.",

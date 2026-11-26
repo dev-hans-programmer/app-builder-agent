@@ -6,8 +6,12 @@ from pathlib import Path
 from uuid import UUID
 
 import httpx
+import pytest
 
-from src.control_plane.infrastructure.github import GitHubPublisher
+from src.control_plane.infrastructure.github import (
+    GitHubPublisher,
+    GitHubPublishingError,
+)
 
 RUN_ID = UUID("11111111-2222-3333-4444-555555555555")
 MARKER = f"[app-builder-run:{RUN_ID}]"
@@ -175,3 +179,28 @@ def test_redelivery_reuses_commit_created_by_same_run(tmp_path: Path) -> None:
     result = asyncio.run(publish())
     assert result.commit_sha == "existing-commit"
     assert writes == []
+
+
+def test_git_api_forbidden_error_identifies_permission_and_operation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            json={"message": "Resource not accessible by personal access token"},
+        )
+
+    async def create_tree() -> None:
+        async with _publisher(httpx.MockTransport(handler)) as publisher:
+            await publisher._request(
+                "POST",
+                "/repos/hasanali/todo/git/trees",
+                expected={201},
+                json={"tree": []},
+            )
+
+    with pytest.raises(GitHubPublishingError) as captured:
+        asyncio.run(create_tree())
+
+    message = str(captured.value)
+    assert "POST /repos/hasanali/todo/git/trees" in message
+    assert "Contents: Read and write" in message
+    assert "Workflows: Read and write" in message

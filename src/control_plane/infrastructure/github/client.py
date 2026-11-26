@@ -318,8 +318,16 @@ class GitHubPublisher:
             message = str(response.json().get("message") or "GitHub API error")
         except (ValueError, AttributeError):
             message = "GitHub API error"
+        permission_hint = ""
+        if response.status_code == 403 and "/git/" in path:
+            permission_hint = (
+                " Configure GITHUB_TOKEN with repository Contents: Read and write;"
+                " generated .github/workflows files also require Workflows: Read and"
+                " write."
+            )
         raise GitHubPublishingError(
-            f"GitHub API returned {response.status_code}: {message[:300]}"
+            f"GitHub API returned {response.status_code} for {method} {path}: "
+            f"{message[:300]}.{permission_hint}"
         )
 
     def _result(

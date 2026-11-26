@@ -400,6 +400,23 @@ def _build_structured_api_contracts(
         ("PATCH", "/{id}", "update", 200),
         ("DELETE", "/{id}", "delete", 204),
     )
+    operation_terms = {
+        "create": ("create", "add"),
+        "list": ("list", "search", "filter", "sort", "paginate", "browse"),
+        "get": (
+            "get",
+            "read",
+            "view",
+            "fetch",
+            "retrieve",
+            "find",
+            "lookup",
+            "individual",
+            "detail",
+        ),
+        "update": ("update", "edit", "complete", "incomplete"),
+        "delete": ("delete", "remove"),
+    }
     if any(
         marker in requirements_text
         for marker in ("crud", "manage", "lifecycle", "todo", "task")
@@ -411,21 +428,25 @@ def _build_structured_api_contracts(
             for operation in all_operations
             if (
                 operation[2] == "create"
-                and any(marker in requirements_text for marker in ("create", "add"))
+                and any(
+                    marker in requirements_text for marker in operation_terms["create"]
+                )
                 or operation[2] == "list"
                 and any(
-                    marker in requirements_text
-                    for marker in ("list", "search", "browse")
+                    marker in requirements_text for marker in operation_terms["list"]
                 )
                 or operation[2] == "get"
                 and any(
-                    marker in requirements_text
-                    for marker in ("get", "read", "view", "fetch")
+                    marker in requirements_text for marker in operation_terms["get"]
                 )
                 or operation[2] == "update"
-                and any(marker in requirements_text for marker in ("update", "edit"))
+                and any(
+                    marker in requirements_text for marker in operation_terms["update"]
+                )
                 or operation[2] == "delete"
-                and any(marker in requirements_text for marker in ("delete", "remove"))
+                and any(
+                    marker in requirements_text for marker in operation_terms["delete"]
+                )
             )
         )
         if not operations:
@@ -434,13 +455,6 @@ def _build_structured_api_contracts(
                 for operation in all_operations
                 if operation[2] in {"list", "get"}
             )
-    operation_terms = {
-        "create": ("create", "add"),
-        "list": ("list", "search", "filter", "sort", "paginate", "view"),
-        "get": ("view", "get", "read"),
-        "update": ("update", "edit", "complete", "incomplete"),
-        "delete": ("delete", "remove"),
-    }
     resource_entities = [entity for entity in entities if entity != "user"]
     for entity in resource_entities[:3]:
         schema = _contract_name(entity)
