@@ -125,6 +125,7 @@ def _build_spec_prompt(
 ) -> str:
     scope_items = spec.get("scope", [])
     acceptance_items = spec.get("acceptance_criteria", [])
+    contract_ids = spec.get("contract_ids", [])
     task_lines = []
     for task in spec.get("tasks", []):
         task_lines.append(f"- {task.get('title', '')}: {task.get('objective', '')}")
@@ -150,6 +151,9 @@ def _build_spec_prompt(
         "",
         "## Acceptance Criteria",
         *[f"- {item}" for item in acceptance_items],
+        "",
+        "## Contract IDs",
+        *[f"- {item}" for item in contract_ids],
         "",
         "## Ordered Tasks",
         *task_lines,
@@ -180,6 +184,16 @@ def _build_spec_artifact(
 
     tasks = _build_spec_tasks(project_name, spec_id, module_name, concerns)
     scope = [module_name, *concerns] if concerns else [module_name]
+    approved_criteria = [
+        f"{item['id']}: {item['requirement']}"
+        for item in requirements.get("acceptance_criteria", [])
+        if item.get("status") == "approved"
+    ]
+    api_contract_ids = [item["id"] for item in architecture.get("api_contracts", [])]
+    data_contract_ids = [item["id"] for item in architecture.get("data_contracts", [])]
+    contract_ids = api_contract_ids if module_name in {"transport", "application"} else []
+    if module_name in {"domain", "data", "application"}:
+        contract_ids = [*contract_ids, *data_contract_ids]
     spec = {
         "id": spec_id,
         "title": f"{module_name.title()} Spec",
@@ -191,10 +205,17 @@ def _build_spec_artifact(
         "scope": scope,
         "dependencies": dependency_ids,
         "acceptance_criteria": [
+            *approved_criteria,
             f"{module_name} behavior is implemented in isolation.",
             f"{module_name} is represented by a dedicated spec folder.",
             "The spec includes explicit tasks and a ready-to-use prompt.",
         ],
+        "acceptance_criteria_ids": [
+            item["id"]
+            for item in requirements.get("acceptance_criteria", [])
+            if item.get("status") == "approved"
+        ],
+        "contract_ids": list(dict.fromkeys(contract_ids)),
         "verification_steps": [
             f"Review {module_name} spec.md against the technical design.",
             f"Confirm {module_name} tasks.md captures the ordered work.",
@@ -333,6 +354,9 @@ def _render_spec_markdown(spec: Dict[str, Any]) -> str:
         "",
         "## Acceptance Criteria",
         *[f"- {item}" for item in spec.get("acceptance_criteria", [])],
+        "",
+        "## Linked Contracts",
+        *[f"- {item}" for item in spec.get("contract_ids", [])],
         "",
         "## Verification Steps",
         *[f"- {item}" for item in spec.get("verification_steps", [])],

@@ -122,12 +122,64 @@ def _parallel_groups(nodes: list[Dict[str, Any]], ordered_specs: list[str]) -> l
     return groups
 
 
-def build_execution_plan(spec_tree: Dict[str, Any], project_name: str) -> Dict[str, Any]:
+def _build_executable_tasks(
+    spec_tree: Dict[str, Any],
+    requirements: Dict[str, Any],
+    architecture: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    acceptance_ids = [
+        item["id"]
+        for item in requirements.get("acceptance_criteria", [])
+        if item.get("status") == "approved" and item.get("id")
+    ]
+    api_ids = [item["id"] for item in architecture.get("api_contracts", [])]
+    data_ids = [item["id"] for item in architecture.get("data_contracts", [])]
+    tasks: list[Dict[str, Any]] = []
+    previous_task_id: str | None = None
+    for index, spec in enumerate(spec_tree.get("specs", []), start=1):
+        task_id = f"TASK-{index:03d}"
+        module_name = str(spec.get("module_name") or "application")
+        contract_ids = list(spec.get("contract_ids", []))
+        if not contract_ids:
+            contract_ids = api_ids if module_name in {"transport", "application"} else []
+            if module_name in {"domain", "data", "application"}:
+                contract_ids = [*contract_ids, *data_ids]
+        tasks.append(
+            {
+                "id": task_id,
+                "order": index,
+                "spec_id": spec.get("id"),
+                "title": f"Implement {spec.get('title', module_name)}",
+                "objective": spec.get("objective", f"Implement the {module_name} module."),
+                "module": module_name,
+                "scope": list(spec.get("scope", [])),
+                "dependencies": [previous_task_id] if previous_task_id else [],
+                "acceptance_criteria_ids": list(
+                    spec.get("acceptance_criteria_ids", acceptance_ids)
+                ),
+                "contract_ids": list(dict.fromkeys(contract_ids)),
+                "verification_categories": ["build", "lint", "type", "test", "smoke"],
+                "status": "ready",
+            }
+        )
+        previous_task_id = task_id
+    return tasks
+
+
+def build_execution_plan(
+    spec_tree: Dict[str, Any],
+    project_name: str,
+    requirements: Dict[str, Any] | None = None,
+    architecture: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     """Build a structured execution plan from a spec tree."""
     nodes = _collect_spec_nodes(spec_tree)
     dependency_graph = _build_dependency_graph(nodes)
     ordered_specs = _topological_order(nodes, dependency_graph)
     parallel_groups = _parallel_groups(nodes, ordered_specs)
+    tasks = _build_executable_tasks(
+        spec_tree, requirements or {}, architecture or {}
+    )
 
     checkpoints = [f"checkpoint-after-{group[0]}" for group in parallel_groups]
     if not checkpoints and ordered_specs:
@@ -137,12 +189,15 @@ def build_execution_plan(spec_tree: Dict[str, Any], project_name: str) -> Dict[s
         "id": f"{project_name}-execution-plan",
         "title": f"Execution Plan for {project_name}",
         "ordered_specs": ordered_specs,
+        "ordered_tasks": [task["id"] for task in tasks],
+        "tasks": tasks,
         "dependency_graph": dependency_graph,
         "parallel_groups": parallel_groups,
         "checkpoints": checkpoints,
         "retry_policy": {
             "max_attempts_per_spec": 2,
-            "strategy": "exponential_backoff",
+            "max_repair_attempts": 2,
+            "strategy": "targeted_repair",
         },
         "status": "draft",
     }
@@ -156,6 +211,22 @@ def render_execution_plan_markdown(plan: Dict[str, Any]) -> str:
         "",
         f"**ID**: {plan['id']}",
         f"**Title**: {plan['title']}",
+        "",
+        "## Executable Tasks",
+        "",
+        "| Order | ID | Module | Objective | Acceptance | Contracts |",
+        "| ---: | --- | --- | --- | --- | --- |",
+        *[
+            "| {order} | {id} | {module} | {objective} | {acceptance} | {contracts} |".format(
+                order=task.get("order", ""),
+                id=task.get("id", ""),
+                module=task.get("module", ""),
+                objective=str(task.get("objective", "")).replace("|", "\\|"),
+                acceptance=", ".join(task.get("acceptance_criteria_ids", [])) or "none",
+                contracts=", ".join(task.get("contract_ids", [])) or "none",
+            )
+            for task in plan.get("tasks", [])
+        ],
         "",
         "## Ordered Specs",
         *[f"- {spec_id}" for spec_id in plan.get("ordered_specs", [])],
@@ -233,7 +304,12 @@ def plan_execution(state: BuilderState) -> Dict[str, Any]:
     )
     project_name = state["project_name"]
 
-    plan = build_execution_plan(spec_tree, project_name)
+    plan = build_execution_plan(
+        spec_tree,
+        project_name,
+        state.get("requirements") or {},
+        state.get("architecture_plan") or {},
+    )
     artifact_paths = persist_execution_plan_artifacts(plan, manifest, state["job_id"])
     validation_errors = validate_execution_plan(spec_tree, plan)
 

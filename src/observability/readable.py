@@ -11,13 +11,15 @@ from uuid import uuid4
 STEP_DESCRIPTIONS = {
     "parse_input": "Validate the request and selected stack.",
     "requirement_analysis": "Turn the request into explicit requirements and acceptance context.",
+    "acceptance_approval": "Freeze the submitted requirements as approved acceptance criteria.",
     "clarification_gate": "Resolve explicitly supplied open questions.",
     "architecture_planning": "Define architecture, contracts, and implementation boundaries.",
     "spec_decomposition": "Break the architecture into executable specifications.",
     "planning": "Order specifications and dependencies for execution.",
-    "execution_engine": "Prepare task-level implementation artifacts.",
-    "verification": "Check generated artifacts against the execution plan.",
-    "repair": "Repair verification failures and re-check the result.",
+    "generation_start": "Start task-level generation for the selected stack or stacks.",
+    "quality_gate": "Run build, lint, type, test, and smoke checks on generated code.",
+    "targeted_repair": "Repair only the files implicated by failed quality checks.",
+    "traceability": "Verify every approved criterion has contract, task, patch, and test evidence.",
     "python_builder": "Generate the FastAPI implementation.",
     "nodejs_builder": "Generate the Express implementation.",
     "comparison": "Compare successful Python and Node.js implementations.",
@@ -211,6 +213,16 @@ def _outcome_summary(
         history = result.get("repair_history") or []
         latest = history[-1] if history and isinstance(history[-1], Mapping) else {}
         return f"Repair status: {latest.get('status', 'completed')}."
+    if step_id == "quality_gate":
+        quality = result.get("quality_results") or {}
+        return f"Quality gate status: {quality.get('status', 'completed')}."
+    if step_id == "targeted_repair":
+        history = result.get("repair_history") or []
+        latest = history[-1] if history and isinstance(history[-1], Mapping) else {}
+        return f"Targeted repair status: {latest.get('status', 'completed')}."
+    if step_id == "traceability":
+        traceability = result.get("traceability_result") or {}
+        return f"Traceability status: {traceability.get('status', 'completed')}."
     return "The step completed successfully."
 
 

@@ -172,7 +172,10 @@ class BuilderState(TypedDict):
     failed_specs: NotRequired[List[str]]
     execution_trace: NotRequired[List[Dict[str, Any]]]
     verification_results: NotRequired[List[Dict[str, Any]]]
+    quality_results: NotRequired[Dict[str, Any]]
+    traceability_result: NotRequired[Dict[str, Any]]
     repair_history: NotRequired[List[Dict[str, Any]]]
+    repair_attempt: NotRequired[int]
     artifacts: NotRequired[ArtifactManifest]
     checkpoint_ref: NotRequired[str]
     checkpoint_path: NotRequired[str]
@@ -329,7 +332,10 @@ def create_initial_state(
         failed_specs=[],
         execution_trace=[],
         verification_results=[],
+        quality_results={},
+        traceability_result={},
         repair_history=[],
+        repair_attempt=0,
         artifacts=artifact_manifest,
         checkpoint_ref=job_metadata["checkpoint_ref"],
         resume_token=job_metadata["resume_token"],

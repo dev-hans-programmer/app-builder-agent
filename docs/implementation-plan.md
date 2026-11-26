@@ -1,5 +1,9 @@
 # Implementation Plan
 
+> Historical roadmap: the gated generation portion of this plan is now implemented. See
+> [Current Architecture](current-architecture.md) and
+> [Generation Pipeline](generation-pipeline.md). Queue-backed execution remains future work.
+
 This document describes how to build the next version of the agent end to end so the system can handle medium to complex, production-grade backend projects from a PRD or detailed requirement description.
 
 It is intended to answer four questions:
@@ -11,7 +15,9 @@ It is intended to answer four questions:
 
 ## Executive Summary
 
-The current application is a one-shot dual-stack code generator. The next version should become a spec-driven build system with durable state, stepwise execution, verification gates, and repair loops.
+The original application was a one-shot dual-stack code generator. The implemented generation
+path is now spec-driven, checkpointed, quality-gated, repairable, and traceable. Durable
+queue-backed workers remain the next execution-layer milestone.
 
 The core shift is:
 

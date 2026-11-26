@@ -1,5 +1,9 @@
 # Technical Requirements Document: Dual-Stack Backend Builder Agent
 
+> Historical baseline: this document describes the original one-shot prototype and is retained
+> for design history. For implemented behavior, use [Current Architecture](current-architecture.md)
+> and [Generation Pipeline](generation-pipeline.md).
+
 ## Overview
 This document outlines the technical implementation details for the Dual-Stack Backend Builder Agent system. It translates the PRD requirements into concrete technical specifications.
 

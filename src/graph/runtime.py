@@ -32,12 +32,15 @@ WORKSPACE_DIRS = (
 JOB_PHASES = (
     "intake",
     "requirement_analysis",
+    "acceptance_approval",
     "architecture_planning",
     "spec_decomposition",
     "planning",
     "execution",
+    "generation",
     "verification",
     "repair",
+    "traceability",
     "reporting",
     "completed",
 )
@@ -62,6 +65,8 @@ class RequirementArtifact(TypedDict, total=False):
     goals: list[str]
     functional_requirements: list[str]
     non_functional_requirements: list[str]
+    acceptance_criteria: list[Dict[str, Any]]
+    acceptance_approval: Dict[str, Any]
     constraints: list[str]
     assumptions: list[str]
     open_questions: list[str]
@@ -83,6 +88,9 @@ class ArchitectureArtifact(TypedDict, total=False):
     service_boundaries: list[str]
     data_model: list[str]
     api_surface: list[str]
+    api_contracts: list[Dict[str, Any]]
+    data_contracts: list[Dict[str, Any]]
+    error_contract: Dict[str, Any]
     security_strategy: list[str]
     configuration_strategy: list[str]
     observability_strategy: list[str]
@@ -126,6 +134,8 @@ class PlanArtifact(TypedDict, total=False):
     id: str
     title: str
     ordered_specs: list[str]
+    ordered_tasks: list[str]
+    tasks: list[Dict[str, Any]]
     dependency_graph: Dict[str, list[str]]
     parallel_groups: list[list[str]]
     checkpoints: list[str]
@@ -160,6 +170,9 @@ class ArtifactManifest(TypedDict, total=False):
     artifact_manifest_path: str
     steps_dir: str
     comparison_report_markdown: str
+    quality_report_markdown: str
+    latest_repair_report_markdown: str
+    traceability_report_markdown: str
     delivery_summary_markdown: str
     final_checkpoint_path: str
 

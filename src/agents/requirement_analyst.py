@@ -9,6 +9,7 @@ decomposition.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
@@ -205,6 +206,40 @@ def _build_success_criteria(functional_requirements: list[str]) -> list[str]:
     return criteria
 
 
+def _build_acceptance_criteria(
+    functional_requirements: list[str],
+    non_functional_requirements: list[str],
+) -> list[Dict[str, Any]]:
+    """Turn every normalized requirement into a stable, testable contract."""
+    criteria: list[Dict[str, Any]] = []
+    for index, requirement in enumerate(functional_requirements, start=1):
+        criteria.append(
+            {
+                "id": f"AC-{index:03d}",
+                "requirement": requirement,
+                "given": "the generated application is running",
+                "when": f"a user exercises: {requirement}",
+                "then": "the behavior succeeds and returns a valid, documented result",
+                "verification": "automated test and smoke check",
+                "status": "draft",
+            }
+        )
+    for requirement in non_functional_requirements:
+        index = len(criteria) + 1
+        criteria.append(
+            {
+                "id": f"AC-{index:03d}",
+                "requirement": requirement,
+                "given": "the generated application is built and tested",
+                "when": f"the {requirement} quality is evaluated",
+                "then": f"the implementation demonstrates the requested {requirement} quality",
+                "verification": "quality gate evidence",
+                "status": "draft",
+            }
+        )
+    return criteria
+
+
 def _render_bullets(items: list[str]) -> list[str]:
     """Render list items as markdown bullets, with a fallback when empty."""
     return [f"- {item}" for item in items] if items else ["- None captured"]
@@ -231,6 +266,10 @@ def build_requirement_artifact(
         goals=_extract_goals(raw_request),
         functional_requirements=functional_requirements,
         non_functional_requirements=non_functional_requirements,
+        acceptance_criteria=_build_acceptance_criteria(
+            functional_requirements, non_functional_requirements
+        ),
+        acceptance_approval={"status": "pending"},
         constraints=_extract_constraints(raw_request),
         assumptions=_build_assumptions(raw_request),
         # Automatic clarification questions are intentionally disabled. The
@@ -293,6 +332,12 @@ def render_requirements_markdown(requirements: RequirementArtifact) -> str:
                 list(requirements.get("functional_requirements", []))
             )
         ),
+        "",
+        "## Acceptance Criteria",
+        *[
+            f"- **{criterion['id']}**: {criterion['requirement']}"
+            for criterion in requirements.get("acceptance_criteria", [])
+        ],
         "",
         "## Open Questions",
         *_render_bullets(list(requirements.get("open_questions", []))),
@@ -366,5 +411,72 @@ def analyze_requirements(state: BuilderState) -> Dict[str, Any]:
     }
     updates["checkpoint_path"] = str(
         persist_job_checkpoint({**state, **updates}, artifact_manifest, suffix="requirement_analysis")
+    )
+    return updates
+
+
+def render_acceptance_criteria_markdown(requirements: RequirementArtifact) -> str:
+    """Render the approved, stable acceptance baseline used by later gates."""
+    approval = requirements.get("acceptance_approval", {})
+    lines = [
+        "# Approved Acceptance Criteria",
+        "",
+        f"**Status**: {approval.get('status', 'pending')}",
+        f"**Approved By**: {approval.get('approved_by', 'not approved')}",
+        f"**Approved At**: {approval.get('approved_at', '')}",
+        "",
+    ]
+    for criterion in requirements.get("acceptance_criteria", []):
+        lines.extend(
+            [
+                f"## {criterion['id']}: {criterion['requirement']}",
+                "",
+                f"- Given: {criterion['given']}",
+                f"- When: {criterion['when']}",
+                f"- Then: {criterion['then']}",
+                f"- Verification: {criterion['verification']}",
+                f"- Status: {criterion['status']}",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def approve_acceptance_criteria(state: BuilderState) -> Dict[str, Any]:
+    """Approve the submitted requirement baseline without asking generic questions."""
+    manifest = state.get("artifacts") or ensure_workspace_layout(
+        ".", project_name=state.get("project_name")
+    )
+    requirements = dict(state.get("requirements") or {})
+    approved_at = datetime.now(timezone.utc).isoformat()
+    requirements["acceptance_criteria"] = [
+        {**criterion, "status": "approved"}
+        for criterion in requirements.get("acceptance_criteria", [])
+    ]
+    requirements["acceptance_approval"] = {
+        "status": "approved",
+        "approved_by": "submitted request",
+        "approved_at": approved_at,
+        "basis": "The user-submitted request is the generation baseline; no extra features were inferred.",
+    }
+    requirements_dir = Path(manifest["requirements_dir"])
+    requirements_dir.mkdir(parents=True, exist_ok=True)
+    acceptance_path = requirements_dir / "acceptance-criteria.md"
+    acceptance_path.write_text(
+        render_acceptance_criteria_markdown(requirements), encoding="utf-8"
+    )
+    artifact_paths = dict(requirements.get("artifact_paths") or {})
+    artifact_paths["acceptance_criteria_markdown"] = str(acceptance_path)
+    requirements["artifact_paths"] = artifact_paths
+    updates = {
+        "requirements": requirements,
+        "current_phase": "acceptance_approval",
+        "job_status": "running",
+        "artifacts": manifest,
+    }
+    updates["checkpoint_path"] = str(
+        persist_job_checkpoint(
+            {**state, **updates}, manifest, suffix="acceptance_approval"
+        )
     )
     return updates

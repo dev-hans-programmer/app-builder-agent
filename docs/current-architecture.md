@@ -1,189 +1,110 @@
 # Current Architecture
 
-This document describes the codebase as it exists today.
+This document describes the implemented architecture of `app-builder-agent`.
 
 ## Overview
 
-`app-builder-agent` is a CLI-driven LangGraph application that takes a single backend prompt, runs two code generators in parallel, and then produces a comparison report. The current implementation targets two stacks:
+The project is a CLI-driven LangGraph workflow that turns one submitted backend requirement into
+one or two verified implementations:
 
 - Python with FastAPI
 - Node.js with Express
 
-The workflow is optimized for fast prototype generation, not for long-running or deeply planned builds.
+`--stack python|nodejs|both` controls generation. Only dual-stack runs invoke the comparison
+agent. Every online run must pass post-generation quality and requirement traceability gates
+before it is marked complete.
 
-## Runtime Flow
+## Workflow Graph
 
-1. `main.py` loads environment variables and starts the CLI.
-2. The user enters a short description of the backend and a project name.
-3. `create_initial_state()` builds a `BuilderState` object.
-4. `create_workflow()` compiles the LangGraph graph.
-5. `parse_input_node()` validates the prompt and project name.
-6. `python_builder.build()` and `nodejs_builder.build()` run in parallel.
-7. `comparison.compare()` generates a final comparison report.
-8. `generate_report_node()` writes the report to `./reports/`.
+```text
+parse input
+  → requirement analysis
+  → optional explicit clarification handling
+  → acceptance approval
+  → architecture and contracts
+  → spec decomposition
+  → executable task planning
+  → selected builder branch(es)
+  → quality gate ──failed──→ targeted repair ──→ quality gate (maximum two repairs)
+  → traceability gate
+  → optional dual-stack comparison
+  → final report
+```
 
-## Main Components
+The Python and Node.js builders fan out from planning and join at one quality gate. This prevents
+verification from running before generated code exists.
 
-### CLI Orchestrator
+## Requirements and Contracts
 
-File: [`main.py`](../main.py)
+`requirement_analyst.py` creates normalized functional and non-functional requirements plus stable
+`AC-###` acceptance IDs. `approve_acceptance_criteria()` freezes the submitted request as the
+approved baseline without generic questions.
 
-The CLI handles:
+`architect.py` creates:
 
-- reading user input
-- checking environment variables
-- showing progress and results
-- displaying the generated report preview
+- the technical design and module boundaries
+- structured `API-###` endpoint contracts
+- structured `DATA-###` entity contracts
+- the shared `ERROR-001` error response contract
 
-It is a presentation layer and workflow launcher, not the business logic layer.
+Every contract links back to acceptance IDs.
 
-### Workflow Graph
+## Planning and Generation
 
-File: [`src/graph/workflow.py`](../src/graph/workflow.py)
+`spec_generator.py` produces human-readable per-module specifications. `planner.py` reduces these
+to ordered `TASK-###` work items with dependencies, acceptance IDs, contract IDs, and verification
+categories.
 
-The graph is simple and linear after validation:
+Each selected builder performs one model request per executable task. Later requests receive a
+bounded snapshot of files produced by earlier tasks. Model output is parsed as complete-file
+patches; each patch stores its operation and before/after SHA-256 hashes. Absolute paths and path
+traversal outside the stack build directory are rejected.
 
-- parse input
-- fan out to the two builders
-- converge in comparison
-- save report
+The builder step aggregates token and cost information across task calls while retaining readable
+per-task prompts and responses in the run diagnostics.
 
-This is a one-shot workflow with no retry loop, no deep planning phase, and no durable checkpoints.
+## Verification and Repair
 
-### Shared State
+`quality_gate.py` runs commands without a shell and records command, exit code, duration, and
+bounded diagnostics. It evaluates build, lint, type, test, and smoke categories. Tests and smoke
+checks are required; lint and type checks are skipped only when their tools are not available or
+configured.
 
-File: [`src/graph/state.py`](../src/graph/state.py)
+`targeted_repair.py` sends only failed check evidence and current files to the model. Complete-file
+repair patches are applied and the graph reruns every quality check. The loop is bounded at two
+repair attempts.
 
-The workflow state includes:
+`traceability.py` requires each approved criterion to have contract, executable-task, per-stack
+patch, generated-test, and passing quality evidence. A failed traceability gate yields a failed
+delivery.
 
-- `user_prompt`
-- `project_name`
-- `python_output`
-- `nodejs_output`
-- `comparison_report`
-- `timestamp`
-- `errors`
-- `python_build_time`
-- `nodejs_build_time`
+## State and Persistence
 
-The `errors` field is configured as an annotated reducer so parallel branches can append safely.
+`BuilderState` carries normalized artifacts, selected stack outputs, quality history, repair
+history, traceability results, and durable job metadata. Checkpoints are written after the major
+planning and gate transitions so a future queue worker can resume durable jobs.
 
-### Builder Agents
+Project artifacts live under `projects/<project>/`:
 
-Files:
+```text
+requirements/   approved problem and acceptance baseline
+architecture/   technical, API, and data contracts
+specs/          per-module specifications
+plans/          executable task plan
+builds/         generated Python and/or Node.js applications
+verification/   quality gate report
+repairs/        targeted repair attempts
+reports/        traceability, comparison, and delivery reports
+checkpoints/    resumable state snapshots
+runs/           human-readable and machine-readable run diagnostics
+```
 
-- [`src/agents/python_builder.py`](../src/agents/python_builder.py)
-- [`src/agents/nodejs_builder.py`](../src/agents/nodejs_builder.py)
+## Observability
 
-Each builder:
+Every graph node is instrumented. `runs/<run_id>/events.jsonl` is the append-only event stream;
+`README.md`, `timeline.md`, and `steps/*.md` are the human debugging surface. Model steps include
+prompt version/hash, token use, estimated cost when rates are configured, task prompts/responses,
+input/output artifacts, hashes, retry reasons, and error diagnostics.
 
-- creates a prompt from the user request
-- calls the OpenAI chat completions API
-- expects the model to return fenced code blocks in the format `filename: path`
-- parses those code blocks into files
-- writes the files under `projects/<project-name>/builds/python` or `projects/<project-name>/builds/nodejs`
-
-These agents are currently single-pass generators. They do not:
-
-- break a large requirement into specs
-- create implementation tasks
-- iterate on failing tests
-- repair code automatically
-- maintain a durable plan across long builds
-
-### Comparison Agent
-
-File: [`src/agents/comparison.py`](../src/agents/comparison.py)
-
-The comparison agent:
-
-- inspects both build results
-- calls the OpenAI API again for analysis
-- renders a markdown comparison report
-
-It is a reporting step, not a verification or quality-gating step.
-
-### Prompts
-
-Files:
-
-- [`src/prompts/python_builder_prompt.py`](../src/prompts/python_builder_prompt.py)
-- [`src/prompts/nodejs_builder_prompt.py`](../src/prompts/nodejs_builder_prompt.py)
-- [`src/prompts/comparison_prompt.py`](../src/prompts/comparison_prompt.py)
-
-These prompts are optimized for direct code generation from a single prompt. They do not currently encode:
-
-- requirement decomposition
-- spec files
-- acceptance criteria
-- task graphs
-- verification checkpoints
-
-## Current Strengths
-
-- Very small and easy to reason about
-- Parallel code generation for two stacks
-- Simple filesystem output model
-- Clear CLI feedback
-- Existing comparison report generation
-
-## Current Limitations
-
-### 1. No spec-driven decomposition
-
-The system treats the user prompt as an immediate code-generation request. There is no intermediate layer that turns a PRD into:
-
-- bounded requirements
-- architecture decisions
-- spec documents
-- implementation tasks
-- validation criteria
-
-### 2. Not designed for medium or complex projects
-
-The current model assumes a project can be generated in one shot. That works for small APIs, but it breaks down for:
-
-- multi-module backends
-- authentication and authorization
-- background jobs
-- database schemas and migrations
-- modular domain logic
-- multiple iteration passes
-
-### 3. No long-running execution support
-
-There is no persistent job runner, no checkpointing, and no resumable execution model. If a build takes minutes or hours, the current workflow does not have a durable mechanism to:
-
-- pause and resume
-- recover from partial failure
-- continue after verification failures
-- store progress between phases
-
-### 4. Weak verification loop
-
-The workflow generates code and then compares the results, but it does not:
-
-- run tests
-- lint generated code
-- type-check
-- execute build commands
-- repair failures automatically
-
-### 5. Flat artifact model
-
-Generated output is written directly to `builds/` and a report to `reports/`. There is no richer artifact structure for:
-
-- spec documents
-- task plans
-- checkpoints
-- test reports
-- repair logs
-- architecture decisions
-
-## Practical Summary
-
-Today’s architecture is best described as:
-
-> “single-prompt, dual-stack code generation with a final comparison step.”
-
-It is useful for prototypes and small scaffolds, but it is not yet a spec-driven build system for production-grade applications.
+The observability and checkpoint boundaries are designed so queue-backed execution can be added
+without changing generation semantics or artifact formats.

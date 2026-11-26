@@ -80,9 +80,9 @@ Project name:
 task-manager
 ```
 
-The agent will normalize this input and then move through the spec-driven pipeline.
-Automatic clarification questions are currently disabled, so runs proceed directly
-from requirement analysis to architecture planning.
+The agent will normalize this input and then move through the gated generation pipeline.
+Automatic clarification questions are disabled. The submitted request becomes the approved
+acceptance baseline and the run proceeds to architecture and contract generation.
 
 ## Turning Off The Clarification Gate
 
@@ -100,18 +100,19 @@ Automatically generated open questions are currently disabled regardless of this
 The agent processes your request in stages:
 
 1. Requirement analysis
-2. Clarification gate if the input is incomplete
-3. Architecture planning
+2. Acceptance criteria approval
+3. Architecture and API/data contracts
 4. Spec decomposition
-5. Execution planning
-6. Spec execution
-7. Verification and repair
-8. Code generation for the selected stack or stacks
-9. Comparison when `--stack both` is selected
-10. Final reporting
+5. Executable task planning
+6. Task-level code generation for the selected stack or stacks
+7. Build, lint, type, test, and smoke checks
+8. Targeted repair and re-check, up to two attempts
+9. Requirement traceability gate
+10. Comparison when `--stack both` is selected
+11. Final reporting
 
-If the job needs clarification, the workflow will ask in the terminal and then
-continue immediately after the answers are entered.
+See [Generation Pipeline](generation-pipeline.md) for completion rules and the evidence
+produced by each gate.
 
 ## What Output You Will Get
 
@@ -190,55 +191,48 @@ persisted. Configure the optional per-million-token rates in `.env` if you want
 
 ### Requirements
 
-Files describing the normalized request:
+Files describing the normalized and approved request:
 
-- `requirements/requirements.json`
-- `requirements/requirements.md`
-- `requirements/open-questions.md`
-- `requirements/clarification.json`
+- `requirements/prd.md`
+- `requirements/acceptance-criteria.md`
 
 ### Architecture
 
 Files describing the system design:
 
-- `architecture/architecture.json`
-- `architecture/architecture.md`
-- `architecture/decision-log.md`
-- `architecture/module-map.json`
+- `architecture/technical-design.md`
+- `architecture/api-contracts.md`
+- `architecture/data-contracts.md`
 
 ### Specs
 
 Files describing the spec tree:
 
-- `specs/spec-tree.json`
-- `specs/spec-tree.md`
-- `specs/spec-index.json`
+- `specs/spec-breakdown.md`
+- `specs/<number>-<module>/spec.md`
+- `specs/<number>-<module>/tasks.md`
+- `specs/<number>-<module>/prompt.md`
 
 ### Plans
 
 Files describing execution and verification:
 
-- `plans/execution-plan.json`
-- `plans/execution-plan.md`
-- `plans/execution-trace.json`
-- `plans/execution-trace.md`
-- `execution/<spec-id>/summary.json`
-- `execution/<spec-id>/summary.md`
+- `plans/tasks.md`
 
 ### Verification And Repairs
 
 Files describing checks and fixes:
 
-- `verification/verification.json`
-- `verification/verification.md`
-- `repairs/repair.json`
-- `repairs/repair.md`
+- `verification/quality-report.md`
+- `repairs/attempt-1.md`
+- `repairs/attempt-2.md` when a second attempt is needed
 
 ### Reports And Checkpoints
 
 Final and resumable artifacts:
 
 - `reports/comparison-<timestamp>.md`
+- `reports/traceability.md`
 - `reports/delivery-summary.md`
 - `checkpoints/<phase>.json`
 - `checkpoints/final.json`
@@ -267,5 +261,6 @@ The final report is written to `reports/` and includes:
 ## Notes
 
 - The agent is spec-driven, so a longer or more complex request will be broken into more intermediate artifacts.
-- If the request is ambiguous, the clarification gate may pause the job and ask for answers.
+- Generic clarification prompts are disabled. Put important persistence, authentication, and
+  deployment constraints directly in the submitted request.
 - All artifacts are stored relative to the project root unless you run the tool from another directory.

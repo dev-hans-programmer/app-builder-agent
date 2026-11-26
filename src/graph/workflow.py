@@ -28,6 +28,13 @@ def _terminal_job_status(state: BuilderState) -> str:
     if any(output.get("status") == "failed" for output in selected_outputs):
         return "failed"
 
+    quality = state.get("quality_results") or {}
+    if quality and not quality.get("passed"):
+        return "failed"
+    traceability = state.get("traceability_result") or {}
+    if traceability and not traceability.get("passed"):
+        return "failed"
+
     comparison = state.get("comparison_metadata") or {}
     builders_succeeded = selected_outputs and all(
         output.get("status") == "success" for output in selected_outputs
@@ -147,18 +154,18 @@ def generate_report_node(state: BuilderState) -> BuilderState:
 def _route_after_requirement_analysis(state: BuilderState) -> str:
     """Route to clarification or architecture based on open questions."""
     if not state.get("clarification_gate_enabled", True):
-        return "architecture_planning"
+        return "acceptance_approval"
     requirements = state.get("requirements") or {}
     if requirements.get("open_questions"):
         return "clarification_gate"
-    return "architecture_planning"
+    return "acceptance_approval"
 
 
 def _route_after_clarification_gate(state: BuilderState) -> str:
     """Route onward once clarification questions have been asked."""
     if not state.get("clarification_gate_enabled", True):
-        return "architecture_planning"
-    return "architecture_planning"
+        return "acceptance_approval"
+    return "acceptance_approval"
 
 
 def _route_to_builders(state: BuilderState) -> list[str]:
@@ -171,9 +178,35 @@ def _route_to_builders(state: BuilderState) -> list[str]:
     return ["python_builder", "nodejs_builder"]
 
 
+def start_generation_node(state: BuilderState) -> dict:
+    """Mark the transition from planning into task-level code generation."""
+    return {"current_phase": "generation", "job_status": "running"}
+
+
 def _route_after_builder(state: BuilderState) -> str:
-    """Compare dual-stack builds; report single-stack builds directly."""
-    if state.get("target_stack", "both") == "both":
+    """Every selected build must pass through the shared quality gate."""
+    return "quality_gate"
+
+
+def _route_after_quality_gate(state: BuilderState) -> str:
+    """Retry failed checks with a bounded repair loop."""
+    quality = state.get("quality_results") or {}
+    max_attempts = int(
+        (state.get("execution_plan") or {})
+        .get("retry_policy", {})
+        .get("max_repair_attempts", 2)
+    )
+    if not quality.get("passed") and int(state.get("repair_attempt", 0)) < max_attempts:
+        return "targeted_repair"
+    return "traceability"
+
+
+def _route_after_traceability(state: BuilderState) -> str:
+    """Compare only complete dual-stack deliveries."""
+    if (
+        state.get("target_stack", "both") == "both"
+        and (state.get("traceability_result") or {}).get("passed")
+    ):
         return "comparison"
     return "generate_report"
 
@@ -267,13 +300,13 @@ def create_workflow() -> StateGraph:
           ↓
         planning (execution schedule)
           ↓
-        execution_engine (controlled spec write)
-          ↓
-        verification (checks execution artifacts)
-          ↓
-        repair (patches failures if needed)
-          ↓
         selected builder(s)
+          ↓
+        quality_gate (build/lint/type/test/smoke)
+          ↓
+        targeted_repair (bounded loop when checks fail)
+          ↓
+        traceability (requirements to verified patches)
           ↓
         comparison (dual-stack jobs only)
           ↓
@@ -297,11 +330,15 @@ def create_workflow() -> StateGraph:
     from src.agents.comparison import compare as comparison_agent
     from src.agents.architect import analyze_architecture
     from src.agents.clarification_gate import clarify_requirements
-    from src.agents.executor import execute_spec
     from src.agents.planner import plan_execution
-    from src.agents.verification import repair_execution, verify_execution
     from src.agents.spec_generator import generate_specs
-    from src.agents.requirement_analyst import analyze_requirements
+    from src.agents.requirement_analyst import (
+        analyze_requirements,
+        approve_acceptance_criteria,
+    )
+    from src.agents.quality_gate import run_quality_gate
+    from src.agents.targeted_repair import repair_failed_checks
+    from src.agents.traceability import check_requirement_traceability
 
     # Create graph with BuilderState
     workflow = StateGraph(BuilderState)
@@ -312,14 +349,16 @@ def create_workflow() -> StateGraph:
         "parse_input": (parse_input_node, "workflow"),
         "requirement_analysis": (analyze_requirements, "parse_input"),
         "clarification_gate": (clarify_requirements, "requirement_analysis"),
-        "architecture_planning": (analyze_architecture, "requirement_analysis"),
+        "acceptance_approval": (approve_acceptance_criteria, "requirement_analysis"),
+        "architecture_planning": (analyze_architecture, "acceptance_approval"),
         "spec_decomposition": (generate_specs, "architecture_planning"),
         "planning": (plan_execution, "spec_decomposition"),
-        "execution_engine": (execute_spec, "planning"),
-        "verification": (verify_execution, "execution_engine"),
-        "repair": (repair_execution, "verification"),
-        "python_builder": (python_builder_build, "repair"),
-        "nodejs_builder": (nodejs_builder_build, "repair"),
+        "generation_start": (start_generation_node, "planning"),
+        "python_builder": (python_builder_build, "generation_start"),
+        "nodejs_builder": (nodejs_builder_build, "generation_start"),
+        "quality_gate": (run_quality_gate, "python_builder+nodejs_builder"),
+        "targeted_repair": (repair_failed_checks, "quality_gate"),
+        "traceability": (check_requirement_traceability, "quality_gate-or-repair"),
         "comparison": (comparison_agent, "python_builder+nodejs_builder"),
         "generate_report": (generate_report_node, "comparison-or-builder"),
     }
@@ -342,7 +381,7 @@ def create_workflow() -> StateGraph:
         _route_after_requirement_analysis,
         {
             "clarification_gate": "clarification_gate",
-            "architecture_planning": "architecture_planning",
+            "acceptance_approval": "acceptance_approval",
         },
     )
 
@@ -351,28 +390,24 @@ def create_workflow() -> StateGraph:
         "clarification_gate",
         _route_after_clarification_gate,
         {
-            "architecture_planning": "architecture_planning",
+            "acceptance_approval": "acceptance_approval",
             END: END,
         },
     )
+
+    workflow.add_edge("acceptance_approval", "architecture_planning")
 
     # Spec decomposition creates the hierarchical implementation plan
     workflow.add_edge("architecture_planning", "spec_decomposition")
 
     # Planning creates the execution schedule before code generation begins
     workflow.add_edge("spec_decomposition", "planning")
-
-    # Execution engine applies the current spec in a controlled way
-    workflow.add_edge("planning", "execution_engine")
-
-    # Verification and repair happen before the builders continue
-    workflow.add_edge("execution_engine", "verification")
-    workflow.add_edge("verification", "repair")
+    workflow.add_edge("planning", "generation_start")
 
     # Run only the requested builder branches. A list return value fans out both
     # builders in the same superstep for dual-stack jobs.
     workflow.add_conditional_edges(
-        "repair",
+        "generation_start",
         _route_to_builders,
         {
             "python_builder": "python_builder",
@@ -380,16 +415,33 @@ def create_workflow() -> StateGraph:
         },
     )
 
-    # Comparison is meaningful only when both implementations were requested.
+    # All selected generation branches join at the same post-generation gate.
     for builder_node in ("python_builder", "nodejs_builder"):
         workflow.add_conditional_edges(
             builder_node,
             _route_after_builder,
             {
-                "comparison": "comparison",
-                "generate_report": "generate_report",
+                "quality_gate": "quality_gate",
             },
         )
+
+    workflow.add_conditional_edges(
+        "quality_gate",
+        _route_after_quality_gate,
+        {
+            "targeted_repair": "targeted_repair",
+            "traceability": "traceability",
+        },
+    )
+    workflow.add_edge("targeted_repair", "quality_gate")
+    workflow.add_conditional_edges(
+        "traceability",
+        _route_after_traceability,
+        {
+            "comparison": "comparison",
+            "generate_report": "generate_report",
+        },
+    )
 
     # After comparison, generate report
     workflow.add_edge("comparison", "generate_report")

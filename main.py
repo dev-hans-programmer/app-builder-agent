@@ -157,7 +157,7 @@ def get_user_input() -> tuple[str, str]:
 
 
 def display_phase1_start(target_stack: str = "both"):
-    """Display Phase 1 header."""
+    """Display the gated generation pipeline header."""
     selected = _requested_stacks(target_stack)
     builder_lines = []
     if "python" in selected:
@@ -166,15 +166,22 @@ def display_phase1_start(target_stack: str = "both"):
         builder_lines.append("• Building Node.js (Express) backend")
     if len(selected) == 2:
         builder_lines.append("• Running builders in parallel for maximum speed")
+    builder_lines.extend(
+        [
+            "• Approving acceptance criteria and architecture contracts",
+            "• Generating code through executable tasks",
+            "• Running quality, repair, and traceability gates",
+        ]
+    )
 
     console.print()
     console.print("─" * 70, style="dim")
     console.print()
     console.print(
         Panel(
-            "[bold white]Phase 1: Code Generation[/bold white]\n\n"
+            "[bold white]Phase 1: Code Generation — Gated Pipeline[/bold white]\n\n"
             + "\n".join(builder_lines),
-            title="[bold cyan]🚀 Starting Builders[/bold cyan]",
+            title="[bold cyan]🚀 Starting Build[/bold cyan]",
             border_style="cyan",
         )
     )
@@ -690,11 +697,22 @@ def _run_build_flow(
             output_lines.append(
                 f"• [cyan]{(final_state.get('nodejs_output') or {}).get('output_dir', 'N/A')}[/cyan]"
             )
+        quality_report = (final_state.get("quality_results") or {}).get("artifact_path")
+        traceability_report = (final_state.get("traceability_result") or {}).get("artifact_path")
+        report_lines = [
+            line
+            for line in (
+                f"• Quality: [cyan]{quality_report}[/cyan]" if quality_report else "",
+                f"• Traceability: [cyan]{traceability_report}[/cyan]" if traceability_report else "",
+            )
+            if line
+        ]
         console.print(
             Panel(
                 "[bold green]✨ Build complete![/bold green]\n\n"
                 "Your backend is ready in:\n" + "\n".join(output_lines) + "\n\n"
-                "[dim]Next steps: Review the code, run the applications, and start building![/dim]",
+                + ("Verification evidence:\n" + "\n".join(report_lines) + "\n\n" if report_lines else "")
+                + "[dim]Next step: review the generated contracts, code, and verification evidence.[/dim]",
                 title="[bold green]🎉 Success[/bold green]",
                 border_style="green",
             )

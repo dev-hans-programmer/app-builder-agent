@@ -313,7 +313,8 @@ def _update_summary(
     elif step_finished and event.get("status") == "failed" and event.get("stack_trace"):
         status = "failed"
 
-    event_cost = event.get("estimated_cost")
+    usage_detail = bool(event.get("usage_detail"))
+    event_cost = None if usage_detail else event.get("estimated_cost")
     cost_estimated = bool(summary.get("cost_estimated")) or isinstance(
         event_cost, (int, float)
     )
@@ -343,13 +344,13 @@ def _update_summary(
             "failed_steps": failed_steps,
             "action_items": action_items,
             "input_tokens": int(summary.get("input_tokens", 0))
-            + int(event.get("input_tokens") or 0),
+            + (0 if usage_detail else int(event.get("input_tokens") or 0)),
             "output_tokens": int(summary.get("output_tokens", 0))
-            + int(event.get("output_tokens") or 0),
+            + (0 if usage_detail else int(event.get("output_tokens") or 0)),
             "cached_tokens": int(summary.get("cached_tokens", 0))
-            + int(event.get("cached_tokens") or 0),
+            + (0 if usage_detail else int(event.get("cached_tokens") or 0)),
             "reasoning_tokens": int(summary.get("reasoning_tokens", 0))
-            + int(event.get("reasoning_tokens") or 0),
+            + (0 if usage_detail else int(event.get("reasoning_tokens") or 0)),
             "estimated_cost": estimated_cost,
             "cost_estimated": cost_estimated,
             "started_at": summary.get("started_at")
@@ -571,13 +572,21 @@ def record_step_artifact(filename: str, content: Any) -> str | None:
         "stderr.log": "error.log",
     }
     suffix = suffixes.get(safe_name)
+    artifact_kind = safe_name
+    dynamic = re.fullmatch(
+        r"((?:task-\d+|repair-\d+(?:-(?:python|nodejs))?)-(?:prompt\.txt|response\.json))",
+        safe_name,
+    )
+    if suffix is None and dynamic:
+        artifact_kind = "prompt.txt" if safe_name.endswith("prompt.txt") else "response.json"
+        suffix = safe_name.replace(".txt", ".md").replace(".json", ".md")
     if suffix is None:
         raise ValueError(f"Unsupported step artifact: {filename}")
     target = active.report_path.parent / f"{active.artifact_stem}-{suffix}"
     target.parent.mkdir(parents=True, exist_ok=True)
-    if safe_name in {"prompt.txt", "response.json"}:
+    if artifact_kind in {"prompt.txt", "response.json"}:
         rendered = render_model_artifact(
-            safe_name,
+            artifact_kind,
             redact(content),
             step_id=active.step_id,
             attempt=active.attempt,
@@ -692,10 +701,35 @@ def _model_metadata(result: Mapping[str, Any], step_id: str) -> dict[str, Any]:
         candidates.append(
             output.get("observability") if isinstance(output, Mapping) else None
         )
-    for candidate in candidates:
-        if isinstance(candidate, Mapping):
-            return dict(candidate)
-    return {}
+    elif step_id == "targeted_repair":
+        history = result.get("repair_history")
+        latest = history[-1] if isinstance(history, list) and history else None
+        if isinstance(latest, Mapping):
+            for record in latest.get("records", []):
+                if isinstance(record, Mapping):
+                    candidates.append(record.get("observability"))
+    valid = [dict(candidate) for candidate in candidates if isinstance(candidate, Mapping)]
+    if not valid:
+        return {}
+    if len(valid) == 1:
+        return valid[0]
+    aggregate = dict(valid[-1])
+    aggregate["model_calls"] = len(valid)
+    aggregate["model_request_ids"] = [
+        item.get("model_request_id") for item in valid if item.get("model_request_id")
+    ]
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "cached_tokens",
+        "reasoning_tokens",
+        "visible_output_tokens",
+        "total_tokens",
+        "estimated_cost",
+    ):
+        values = [item.get(key) for item in valid if isinstance(item.get(key), (int, float))]
+        aggregate[key] = sum(values) if values else None
+    return aggregate
 
 
 def _business_outcome(
@@ -743,6 +777,46 @@ def _business_outcome(
             "The workflow is blocked by verification.",
             "Review failed verification checks and repair the referenced artifacts.",
         )
+    if step_id == "quality_gate":
+        quality = result.get("quality_results")
+        if isinstance(quality, Mapping) and not quality.get("passed"):
+            failures = [
+                f"{stack.get('stack')}:{check.get('category')}"
+                for stack in quality.get("stacks", [])
+                if isinstance(stack, Mapping)
+                for check in stack.get("checks", [])
+                if isinstance(check, Mapping) and check.get("status") == "failed"
+            ]
+            return (
+                "failed",
+                "QualityGateFailed",
+                f"Failed checks: {', '.join(failures) or 'generation'}",
+                "Inspect the quality report; the workflow will attempt a targeted repair.",
+            )
+    if step_id == "targeted_repair":
+        history = result.get("repair_history")
+        latest = history[-1] if isinstance(history, list) and history else None
+        if isinstance(latest, Mapping) and latest.get("status") in {"failed", "partial"}:
+            return (
+                "failed",
+                "TargetedRepairFailed",
+                "The repair attempt did not patch every failing stack.",
+                "Inspect the repair response and the failed quality command before the next attempt.",
+            )
+    if step_id == "traceability":
+        traceability = result.get("traceability_result")
+        if isinstance(traceability, Mapping) and not traceability.get("passed"):
+            missing = [
+                f"{item.get('id')}: {', '.join(item.get('missing', []))}"
+                for item in traceability.get("criteria", [])
+                if isinstance(item, Mapping) and item.get("missing")
+            ]
+            return (
+                "failed",
+                "TraceabilityGateFailed",
+                "; ".join(missing) or "Requirement evidence is incomplete.",
+                "Inspect reports/traceability.md and repair the missing contract, patch, or check evidence.",
+            )
     if result.get("job_status") == "failed":
         errors = result.get("errors") or []
         return (
@@ -755,6 +829,33 @@ def _business_outcome(
 
 
 def _verification_details(result: Mapping[str, Any], step_id: str) -> dict[str, Any]:
+    if step_id == "quality_gate":
+        quality = result.get("quality_results")
+        if not isinstance(quality, Mapping):
+            return {}
+        checks = [
+            check
+            for stack in quality.get("stacks", [])
+            if isinstance(stack, Mapping)
+            for check in stack.get("checks", [])
+            if isinstance(check, Mapping)
+        ]
+        failed = [check for check in checks if check.get("status") == "failed"]
+        first = failed[0] if failed else {}
+        return {
+            "verification_checks": checks,
+            "verification_check": first.get("category", "all checks"),
+            "expected": "all required quality checks pass",
+            "actual": f"{len(failed)} failed check(s)",
+            "severity": "error" if failed else "info",
+            "command": first.get("command_display"),
+            "exit_code": first.get("exit_code"),
+            "retry_reason": (
+                f"{first.get('stack')} {first.get('category')} failed"
+                if first
+                else None
+            ),
+        }
     if step_id not in {"verification", "repair"}:
         return {}
     history = result.get("verification_results")

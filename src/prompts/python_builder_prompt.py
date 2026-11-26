@@ -5,12 +5,15 @@ This module contains the system prompt and helper functions for generating
 prompts to Claude API for Python backend code generation.
 """
 
-PYTHON_BUILDER_PROMPT_VERSION = "1.0"
+import json
+
+
+PYTHON_BUILDER_PROMPT_VERSION = "2.0"
 
 
 PYTHON_BUILDER_SYSTEM_PROMPT = """You are an expert Python backend developer specializing in FastAPI.
 
-Your task is to generate a complete, production-ready FastAPI application based on the user's requirements.
+Your task is to implement one executable task in a production-ready FastAPI application.
 
 IMPORTANT: Output each file using this exact format:
 ```filename: path/to/file.py
@@ -31,10 +34,25 @@ Requirements:
 
 Start with requirements.txt, then main.py, then other files as needed.
 Keep the code clean, simple, and well-organized.
+
+For task-level generation:
+- Treat approved acceptance criteria and architecture contracts as binding.
+- Output only files created or changed by the current task.
+- Always output complete file contents, never diffs or placeholders.
+- Preserve compatible behavior from the supplied current files.
+- Add or update focused automated tests for the task.
 """
 
 
-def create_python_prompt(user_prompt: str, project_name: str) -> str:
+def create_python_prompt(
+    user_prompt: str,
+    project_name: str,
+    *,
+    task: dict | None = None,
+    requirements: dict | None = None,
+    architecture: dict | None = None,
+    current_files: dict[str, str] | None = None,
+) -> str:
     """
     Create the full prompt for Python/FastAPI builder.
 
@@ -58,10 +76,26 @@ def create_python_prompt(user_prompt: str, project_name: str) -> str:
         >>> "todo-api" in prompt
         True
     """
+    context = ""
+    if task is not None:
+        context = f"""
+Approved requirements and acceptance criteria:
+{json.dumps(requirements or {}, indent=2, sort_keys=True)}
+
+Architecture and contracts:
+{json.dumps(architecture or {}, indent=2, sort_keys=True)}
+
+Current executable task:
+{json.dumps(task, indent=2, sort_keys=True)}
+
+Current project files:
+{json.dumps(current_files or {}, indent=2, sort_keys=True)}
+"""
     return f"""{PYTHON_BUILDER_SYSTEM_PROMPT}
 
 Project Name: {project_name}
 User Request: {user_prompt}
+{context}
 
-Generate a complete FastAPI application that fulfills this request.
+Implement the current task. If no task context is present: Generate a complete FastAPI application.
 """

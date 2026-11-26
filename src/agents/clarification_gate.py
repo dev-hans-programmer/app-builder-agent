@@ -9,7 +9,7 @@ requirement artifact before the workflow continues.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
 from rich.console import Console
 

@@ -23,11 +23,15 @@ _STOP_WORDS = {
     "app",
     "application",
     "build",
+    "backend",
     "create",
     "for",
     "in",
     "of",
     "or",
+    "operations",
+    "service",
+    "system",
     "the",
     "to",
     "use",
@@ -45,7 +49,6 @@ def _requirements_to_text(requirements: Dict[str, Any]) -> str:
         " ".join(requirements.get("functional_requirements", []) or []),
         " ".join(requirements.get("non_functional_requirements", []) or []),
         " ".join(requirements.get("constraints", []) or []),
-        " ".join(requirements.get("assumptions", []) or []),
         clarification_text,
     ]
     return " ".join(part for part in parts if part).lower()
@@ -65,7 +68,13 @@ def _infer_primary_entities(requirements_text: str) -> list[str]:
             if candidate and candidate not in entities:
                 entities.append(candidate)
     if not entities:
-        entities.append("core resource")
+        fallback_words = [
+            word
+            for word in re.findall(r"[a-z][a-z0-9_-]*", requirements_text)
+            if word not in _STOP_WORDS
+            and word not in {"crud", "secure", "simple", "specific", "implementation", "stack", "mentioned"}
+        ]
+        entities.append(fallback_words[0].replace("-app", "") if fallback_words else "core resource")
     return entities
 
 
@@ -151,7 +160,7 @@ def _build_api_contracts(requirements_text: str) -> list[str]:
     entities = _infer_primary_entities(requirements_text)
     contracts: list[str] = []
     for entity in entities[:3]:
-        contracts.append(f"Provide lifecycle endpoints for {entity}.")
+        contracts.append(f"Provide only the approved operations for {entity}.")
     if len(entities) >= 2:
         contracts.append(f"Provide endpoints that manage the relationship between {entities[0]} and {entities[1]}.")
     if any(token in requirements_text for token in ("auth", "login", "oauth", "role", "permission", "authorization")):
@@ -161,6 +170,101 @@ def _build_api_contracts(requirements_text: str) -> list[str]:
     if not contracts:
         contracts.append("Derive the API surface directly from the requirement text.")
     return contracts
+
+
+def _contract_name(entity: str) -> str:
+    words = re.findall(r"[a-z0-9]+", entity.lower()) or ["resource"]
+    return "".join(word.capitalize() for word in words)
+
+
+def _contract_path(entity: str) -> str:
+    words = re.findall(r"[a-z0-9]+", entity.lower()) or ["resources"]
+    name = "-".join(words)
+    return name if name.endswith("s") else f"{name}s"
+
+
+def _build_structured_api_contracts(
+    entities: list[str], acceptance_ids: list[str], requirements_text: str
+) -> list[Dict[str, Any]]:
+    """Create explicit endpoint contracts generation and tests can share."""
+    contracts: list[Dict[str, Any]] = []
+    all_operations = (
+        ("POST", "", "create", 201),
+        ("GET", "", "list", 200),
+        ("GET", "/{id}", "get", 200),
+        ("PATCH", "/{id}", "update", 200),
+        ("DELETE", "/{id}", "delete", 204),
+    )
+    if any(marker in requirements_text for marker in ("crud", "manage", "lifecycle", "todo", "task")):
+        operations = all_operations
+    else:
+        operations = tuple(
+            operation
+            for operation in all_operations
+            if (
+                operation[2] == "create" and any(marker in requirements_text for marker in ("create", "add"))
+                or operation[2] == "list" and any(marker in requirements_text for marker in ("list", "search", "browse"))
+                or operation[2] == "get" and any(marker in requirements_text for marker in ("get", "read", "view", "fetch"))
+                or operation[2] == "update" and any(marker in requirements_text for marker in ("update", "edit"))
+                or operation[2] == "delete" and any(marker in requirements_text for marker in ("delete", "remove"))
+            )
+        )
+        if not operations:
+            operations = tuple(operation for operation in all_operations if operation[2] in {"list", "get"})
+    for entity in entities[:3]:
+        schema = _contract_name(entity)
+        resource_path = _contract_path(entity)
+        for method, suffix, operation, success_status in operations:
+            contract_id = f"API-{len(contracts) + 1:03d}"
+            contracts.append(
+                {
+                    "id": contract_id,
+                    "method": method,
+                    "path": f"/{resource_path}{suffix}",
+                    "operation": f"{operation} {entity}",
+                    "request_schema": (
+                        f"{schema}Create" if operation == "create" else
+                        f"{schema}Update" if operation == "update" else "none"
+                    ),
+                    "response_schema": (
+                        "none" if operation == "delete" else
+                        f"list[{schema}]" if operation == "list" else schema
+                    ),
+                    "success_status": success_status,
+                    "error_statuses": [400, 404, 422, 500],
+                    "acceptance_criteria_ids": acceptance_ids,
+                }
+            )
+    return contracts
+
+
+def _build_data_contracts(
+    entities: list[str], acceptance_ids: list[str]
+) -> list[Dict[str, Any]]:
+    """Create a conservative data shape without inventing product features."""
+    return [
+        {
+            "id": f"DATA-{index:03d}",
+            "entity": _contract_name(entity),
+            "fields": [
+                {"name": "id", "type": "string", "required": True, "immutable": True},
+                {"name": "title", "type": "string", "required": True, "immutable": False},
+                {"name": "created_at", "type": "datetime", "required": True, "immutable": True},
+                {"name": "updated_at", "type": "datetime", "required": True, "immutable": False},
+            ],
+            "acceptance_criteria_ids": acceptance_ids,
+        }
+        for index, entity in enumerate(entities[:3], start=1)
+    ]
+
+
+def _build_error_contract() -> Dict[str, Any]:
+    return {
+        "id": "ERROR-001",
+        "content_type": "application/json",
+        "fields": ["error.code", "error.message", "error.details", "request_id"],
+        "rule": "Errors use a stable machine code and never expose stack traces to clients.",
+    }
 
 
 def _needs_rbac(requirements_text: str) -> bool:
@@ -295,6 +399,9 @@ def build_architecture_artifact(requirements: Dict[str, Any], project_name: str)
     """Build a structured architecture artifact from requirement metadata."""
     requirements_text = _requirements_to_text(requirements)
     entities = _infer_primary_entities(requirements_text)
+    acceptance_ids = [
+        item["id"] for item in requirements.get("acceptance_criteria", []) if item.get("id")
+    ]
     summary = requirements.get("summary") or requirements.get("title") or f"Architecture for {project_name}"
 
     return ArchitectureArtifact(
@@ -307,6 +414,11 @@ def build_architecture_artifact(requirements: Dict[str, Any], project_name: str)
         service_boundaries=_build_service_boundaries(requirements_text, entities),
         data_model=_build_data_model(requirements_text),
         api_surface=_build_api_contracts(requirements_text),
+        api_contracts=_build_structured_api_contracts(
+            entities, acceptance_ids, requirements_text
+        ),
+        data_contracts=_build_data_contracts(entities, acceptance_ids),
+        error_contract=_build_error_contract(),
         security_strategy=_build_security_strategy(requirements_text),
         configuration_strategy=_build_configuration_strategy(requirements_text),
         observability_strategy=_build_observability_strategy(requirements_text),
@@ -397,6 +509,55 @@ def render_architecture_markdown(architecture: ArchitectureArtifact) -> str:
     return "\n".join(sections)
 
 
+def render_api_contracts_markdown(architecture: ArchitectureArtifact) -> str:
+    lines = ["# API Contracts", ""]
+    for contract in architecture.get("api_contracts", []):
+        lines.extend(
+            [
+                f"## {contract['id']}: {contract['method']} {contract['path']}",
+                "",
+                f"- Operation: {contract['operation']}",
+                f"- Request: `{contract['request_schema']}`",
+                f"- Response: `{contract['response_schema']}`",
+                f"- Success status: `{contract['success_status']}`",
+                f"- Error statuses: {', '.join(str(code) for code in contract['error_statuses'])}",
+                f"- Acceptance criteria: {', '.join(contract['acceptance_criteria_ids']) or 'none'}",
+                "",
+            ]
+        )
+    error = architecture.get("error_contract", {})
+    lines.extend(
+        [
+            "## Shared Error Contract",
+            "",
+            f"- ID: {error.get('id', '')}",
+            f"- Content type: `{error.get('content_type', '')}`",
+            f"- Fields: {', '.join(error.get('fields', []))}",
+            f"- Rule: {error.get('rule', '')}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_data_contracts_markdown(architecture: ArchitectureArtifact) -> str:
+    lines = ["# Data Contracts", ""]
+    for contract in architecture.get("data_contracts", []):
+        lines.extend([f"## {contract['id']}: {contract['entity']}", ""])
+        for field in contract.get("fields", []):
+            lines.append(
+                f"- `{field['name']}: {field['type']}` — "
+                f"required={str(field['required']).lower()}, immutable={str(field['immutable']).lower()}"
+            )
+        lines.extend(
+            [
+                f"- Acceptance criteria: {', '.join(contract['acceptance_criteria_ids']) or 'none'}",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def persist_architecture_artifacts(
     architecture: ArchitectureArtifact,
     manifest: Dict[str, str],
@@ -408,6 +569,10 @@ def persist_architecture_artifacts(
 
     md_path = architecture_dir / "technical-design.md"
     md_path.write_text(render_architecture_markdown(architecture), encoding="utf-8")
+    api_path = architecture_dir / "api-contracts.md"
+    api_path.write_text(render_api_contracts_markdown(architecture), encoding="utf-8")
+    data_path = architecture_dir / "data-contracts.md"
+    data_path.write_text(render_data_contracts_markdown(architecture), encoding="utf-8")
 
     return {
         "technical_design_markdown": str(md_path),
@@ -415,6 +580,8 @@ def persist_architecture_artifacts(
         "architecture_json": str(md_path),
         "decision_log_markdown": str(md_path),
         "module_map_json": str(md_path),
+        "api_contracts_markdown": str(api_path),
+        "data_contracts_markdown": str(data_path),
     }
 
 
@@ -455,6 +622,14 @@ def analyze_architecture(state: BuilderState) -> Dict[str, Any]:
     architecture["layers"] = _build_layers(requirements_text, entities)
     architecture["module_map"] = _build_module_map(requirements_text, entities)
     architecture["api_surface"] = _build_api_contracts(requirements_text)
+    acceptance_ids = [
+        item["id"] for item in requirements.get("acceptance_criteria", []) if item.get("id")
+    ]
+    architecture["api_contracts"] = _build_structured_api_contracts(
+        entities, acceptance_ids, requirements_text
+    )
+    architecture["data_contracts"] = _build_data_contracts(entities, acceptance_ids)
+    architecture["error_contract"] = _build_error_contract()
     architecture["data_model"] = _build_data_model(requirements_text)
     architecture["service_boundaries"] = _build_service_boundaries(requirements_text, entities)
     architecture["security_strategy"] = _build_security_strategy(requirements_text)

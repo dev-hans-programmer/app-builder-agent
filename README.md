@@ -9,6 +9,8 @@ AI-powered agent that generates backend applications in both Python (FastAPI) an
 - ⚡ **Parallel execution** of both builders
 - 📊 **Intelligent comparison** and recommendation
 - 🔎 **Run-scoped observability** with step attempts and artifact hashes
+- 🧭 **Gated generation pipeline** with approved criteria, API/data contracts, task patches,
+  quality checks, targeted repair, and requirement traceability
 - 🤖 **Powered by OpenAI**
 - 🎯 **LangGraph orchestration**
 
@@ -65,6 +67,9 @@ The agent will then generate the selected implementation. When `--stack both`
 is selected, it also compares the two implementations and provides a detailed
 comparison report.
 
+See [Generation Pipeline](docs/generation-pipeline.md) for the artifacts, quality gates,
+repair behavior, and completion rules used by every run.
+
 ### Example
 
 ```bash
@@ -120,16 +125,12 @@ ruff check src/ tests/
 
 ## Project Status
 
-Currently under active development following spec-driven development approach.
+Implemented: stack-selective generation, approved acceptance artifacts, architecture/API/data
+contracts, executable task generation, task-level patches, quality gates, bounded repair,
+traceability, checkpoints, and run observability.
 
-See `features/` directory for implementation progress:
-- [x] 001-project-setup
-- [ ] 002-state-management
-- [ ] 003-workflow-graph
-- [ ] 004-python-builder
-- [ ] 005-nodejs-builder
-- [ ] 006-comparison-agent
-- [ ] 007-cli-interface
+Planned next: queue-backed workers for durable long-running execution and external progress
+tracking.
 
 ## License
 

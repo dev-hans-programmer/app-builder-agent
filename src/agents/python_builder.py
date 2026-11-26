@@ -8,10 +8,12 @@ complete FastAPI applications from user prompts.
 import os
 import time
 import re
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from src.graph.state import BuilderState
 from src.graph.runtime import ensure_workspace_layout
-from src.observability import record_step_artifact
+from src.observability import append_event, record_step_artifact
 from src.observability.model_usage import model_observability
 from src.agents.model_request import (
     chat_completion_options,
@@ -103,6 +105,74 @@ def extract_response_text(response) -> str:
     return ""
 
 
+def _sha256_text(content: str | None) -> str | None:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest() if content is not None else None
+
+
+def _safe_output_path(base_path: Path, filepath: str) -> Path:
+    """Resolve a model-provided path and reject writes outside the build root."""
+    relative = Path(filepath)
+    if relative.is_absolute():
+        raise ValueError(f"Generated path must be relative: {filepath}")
+    resolved_base = base_path.resolve()
+    resolved = (resolved_base / relative).resolve()
+    if resolved != resolved_base and resolved_base not in resolved.parents:
+        raise ValueError(f"Generated path escapes the build directory: {filepath}")
+    return resolved
+
+
+def apply_file_patches(output_dir: str | Path, files: dict[str, str]) -> list[dict]:
+    """Apply complete-file patches safely and return auditable hash metadata."""
+    base_path = Path(output_dir)
+    base_path.mkdir(parents=True, exist_ok=True)
+    patches: list[dict] = []
+    for filepath, content in files.items():
+        full_path = _safe_output_path(base_path, filepath)
+        previous = full_path.read_text(encoding="utf-8") if full_path.is_file() else None
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(content, encoding="utf-8")
+        patches.append(
+            {
+                "path": filepath,
+                "operation": "created" if previous is None else "updated",
+                "sha256_before": _sha256_text(previous),
+                "sha256_after": _sha256_text(content),
+            }
+        )
+    return patches
+
+
+def read_project_files(
+    output_dir: str | Path,
+    *,
+    max_files: int = 40,
+    max_total_chars: int = 160_000,
+) -> dict[str, str]:
+    """Read a bounded text snapshot for the next task prompt."""
+    base_path = Path(output_dir)
+    if not base_path.exists():
+        return {}
+    ignored = {".git", "node_modules", ".venv", "__pycache__", ".pytest_cache"}
+    result: dict[str, str] = {}
+    total = 0
+    for path in sorted(item for item in base_path.rglob("*") if item.is_file()):
+        if any(part in ignored for part in path.parts):
+            continue
+        if path.name == ".env" or path.name.endswith((".pem", ".key", ".p12")):
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if total + len(content) > max_total_chars:
+            break
+        result[str(path.relative_to(base_path))] = content
+        total += len(content)
+        if len(result) >= max_files:
+            break
+    return result
+
+
 def write_files(output_dir: str, files: dict[str, str]) -> None:
     """
     Write generated files to disk.
@@ -124,23 +194,118 @@ def write_files(output_dir: str, files: dict[str, str]) -> None:
         # ./test-project/main.py
         # ./test-project/api/routes/users.py
     """
-    # Create output directory
-    base_path = Path(output_dir)
-    base_path.mkdir(parents=True, exist_ok=True)
-
-    # Write each file
-    for filepath, content in files.items():
-        full_path = base_path / filepath
-
-        # Create parent directories if needed
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write file with UTF-8 encoding
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(content)
+    apply_file_patches(output_dir, files)
 
 
-def build(state: BuilderState) -> dict:
+def _generation_tasks(state: BuilderState) -> list[dict]:
+    tasks = list((state.get("execution_plan") or {}).get("tasks", []))
+    if tasks:
+        return tasks
+    return [
+        {
+            "id": "TASK-001",
+            "title": "Generate the requested application",
+            "objective": state["user_prompt"],
+            "acceptance_criteria_ids": [],
+            "contract_ids": [],
+            "status": "ready",
+        }
+    ]
+
+
+def _aggregate_observability(items: list[dict], model: str, version: str) -> dict:
+    result: dict = {"model": model, "prompt_version": version, "model_calls": len(items)}
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "visible_output_tokens",
+        "cached_tokens",
+        "total_tokens",
+        "estimated_cost",
+    ):
+        values = [item.get(key) for item in items if isinstance(item.get(key), (int, float))]
+        result[key] = sum(values) if values else None
+    if items:
+        result["prompt_hash"] = items[-1].get("prompt_hash")
+        result["model_request_id"] = items[-1].get("model_request_id")
+        result["model_request_ids"] = [
+            item.get("model_request_id") for item in items if item.get("model_request_id")
+        ]
+        result["finish_reason"] = items[-1].get("finish_reason")
+        result.update(
+            {
+                key: value
+                for key, value in items[-1].items()
+                if key.startswith("max_") or key == "reasoning_effort"
+            }
+        )
+    return result
+
+
+def record_generation_task_event(
+    state: BuilderState,
+    *,
+    stack: str,
+    event_type: str,
+    task: dict,
+    attempt: int,
+    started_at: str,
+    duration_ms: float | None = None,
+    status: str,
+    input_artifacts: list[str] | None = None,
+    output_artifacts: list[str] | None = None,
+    patches: list[dict] | None = None,
+    observability: dict | None = None,
+    error: Exception | None = None,
+) -> None:
+    """Emit task-level progress inside an instrumented builder node."""
+    model = dict(observability or {})
+    artifact_paths = [*(input_artifacts or []), *(output_artifacts or [])]
+    artifact_hashes: dict[str, str] = {}
+    for artifact_path in artifact_paths:
+        try:
+            path = Path(artifact_path)
+            if path.is_file():
+                artifact_hashes[artifact_path] = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            continue
+    artifact_hashes.update(
+        {
+            patch["path"]: patch.get("sha256_after")
+            for patch in patches or []
+            if patch.get("sha256_after")
+        }
+    )
+    append_event(
+        state,
+        {
+            "event_type": event_type,
+            "step_id": f"{stack}_builder.task",
+            "parent_step_id": f"{stack}_builder",
+            "node": f"{stack}_builder",
+            "stack": stack,
+            "spec_id": task.get("spec_id"),
+            "task_id": task.get("id"),
+            "acceptance_criterion_id": (task.get("acceptance_criteria_ids") or [None])[0],
+            "attempt": attempt,
+            "status": status,
+            "usage_detail": True,
+            "started_at": started_at,
+            "ended_at": datetime.now(timezone.utc).isoformat() if event_type.endswith("finished") else None,
+            "duration_ms": duration_ms,
+            "input_artifacts": input_artifacts or [],
+            "output_artifacts": output_artifacts or [],
+            "artifact_hashes": artifact_hashes,
+            "files_changed": [patch["path"] for patch in patches or []],
+            "error_type": type(error).__name__ if error else None,
+            "error_message": str(error) if error else None,
+            **model,
+        },
+    )
+
+
+def _legacy_build(state: BuilderState) -> dict:
     """
     Build a Python/FastAPI application using the OpenAI API.
 
@@ -299,5 +464,204 @@ def build(state: BuilderState) -> dict:
             },
             "python_build_time": build_time,
             # `errors` has a LangGraph append reducer, so return only the new item.
+            "errors": [error_msg],
+        }
+
+
+def build(state: BuilderState) -> dict:
+    """Generate the Python application one executable task at a time."""
+    start_time = time.time()
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    observability: dict = {
+        "model": model,
+        "prompt_version": PYTHON_BUILDER_PROMPT_VERSION,
+    }
+    current_task: dict | None = None
+    current_task_started = ""
+    current_task_clock: float | None = None
+    current_input_artifacts: list[str] = []
+    current_usage: dict = {}
+    task_runs: list[dict] = []
+    output_dir: Path | None = None
+    try:
+        manifest = state.get("artifacts") or ensure_workspace_layout(
+            ".", project_name=state.get("project_name")
+        )
+        output_dir = Path(manifest["builds_dir"]) / "python"
+        tasks = _generation_tasks(state)
+        api_key = os.getenv("OPENAI_API_KEY")
+        first_prompt = create_python_prompt(
+            state["user_prompt"],
+            state["project_name"],
+            task=tasks[0],
+            requirements=state.get("requirements") or {},
+            architecture=state.get("architecture_plan") or {},
+            current_files=read_project_files(output_dir),
+        )
+        observability = model_observability(
+            model=model,
+            prompt=first_prompt,
+            prompt_version=PYTHON_BUILDER_PROMPT_VERSION,
+        )
+        if not api_key:
+            record_step_artifact("prompt.txt", first_prompt)
+            print("[Python Builder] ⚠️  OPENAI_API_KEY not found; skipping model calls")
+            return {
+                "python_output": {
+                    "status": "placeholder",
+                    "message": "OPENAI_API_KEY not found; skipping model call",
+                    "output_dir": None,
+                    "files_created": [],
+                    "framework": "FastAPI",
+                    "file_count": 0,
+                    "patches": [],
+                    "observability": observability,
+                },
+                "python_build_time": time.time() - start_time,
+            }
+
+        client = OpenAI(api_key=api_key)
+        request_options = chat_completion_options(model)
+        usage_items: list[dict] = []
+        all_paths: list[str] = []
+        print(f"[Python Builder] Generating {len(tasks)} task(s) for: {state['project_name']}")
+        for index, task in enumerate(tasks, start=1):
+            current_task = task
+            current_task_started = datetime.now(timezone.utc).isoformat()
+            current_task_clock = time.perf_counter()
+            current_files = read_project_files(output_dir)
+            current_input_artifacts = [str(output_dir / path) for path in current_files]
+            prompt = create_python_prompt(
+                state["user_prompt"],
+                state["project_name"],
+                task=task,
+                requirements=state.get("requirements") or {},
+                architecture=state.get("architecture_plan") or {},
+                current_files=current_files,
+            )
+            prompt_artifact = "prompt.txt" if len(tasks) == 1 else f"task-{index:02d}-prompt.txt"
+            response_artifact = "response.json" if len(tasks) == 1 else f"task-{index:02d}-response.json"
+            prompt_path = record_step_artifact(prompt_artifact, prompt)
+            record_generation_task_event(
+                state,
+                stack="python",
+                event_type="task_started",
+                task=task,
+                attempt=1,
+                started_at=current_task_started,
+                status="started",
+                input_artifacts=[*current_input_artifacts, *([prompt_path] if prompt_path else [])],
+            )
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                **request_options,
+            )
+            content = extract_response_text(response)
+            usage = model_observability(
+                model=model,
+                prompt=prompt,
+                prompt_version=PYTHON_BUILDER_PROMPT_VERSION,
+                response=response,
+            )
+            usage.update(request_options)
+            current_usage = usage
+            usage_items.append(usage)
+            response_path = record_step_artifact(
+                response_artifact,
+                {
+                    "id": getattr(response, "id", None),
+                    "model": getattr(response, "model", model),
+                    "content": content,
+                    "finish_reason": completion_finish_reason(response),
+                    "usage": usage,
+                },
+            )
+            require_visible_completion(content, response, request_options)
+            files = parse_code_blocks(content)
+            if not files:
+                raise ValueError(f"No files generated for {task.get('id', f'TASK-{index:03d}')}")
+            patches = apply_file_patches(output_dir, files)
+            all_paths.extend(files)
+            task_runs.append(
+                {
+                    "task_id": task.get("id"),
+                    "spec_id": task.get("spec_id"),
+                    "status": "completed",
+                    "acceptance_criteria_ids": task.get("acceptance_criteria_ids", []),
+                    "contract_ids": task.get("contract_ids", []),
+                    "patches": patches,
+                }
+            )
+            record_generation_task_event(
+                state,
+                stack="python",
+                event_type="task_finished",
+                task=task,
+                attempt=1,
+                started_at=current_task_started,
+                duration_ms=round((time.perf_counter() - current_task_clock) * 1000, 2),
+                status="succeeded",
+                input_artifacts=current_input_artifacts,
+                output_artifacts=[
+                    *[str(output_dir / path) for path in files],
+                    *([response_path] if response_path else []),
+                ],
+                patches=patches,
+                observability=usage,
+            )
+            current_task = None
+
+        observability = _aggregate_observability(
+            usage_items, model, PYTHON_BUILDER_PROMPT_VERSION
+        )
+        files_created = sorted(set(all_paths))
+        build_time = time.time() - start_time
+        print(f"[Python Builder] ✓ Applied {len(task_runs)} task(s) in {output_dir}")
+        return {
+            "python_output": {
+                "status": "success",
+                "output_dir": str(output_dir),
+                "files_created": files_created,
+                "artifact_paths": [str(output_dir / path) for path in files_created],
+                "framework": "FastAPI",
+                "file_count": len(files_created),
+                "task_runs": task_runs,
+                "patches": [patch for run in task_runs for patch in run["patches"]],
+                "observability": observability,
+            },
+            "python_build_time": build_time,
+        }
+    except Exception as exc:
+        if current_task is not None and current_task_clock is not None:
+            try:
+                record_generation_task_event(
+                    state,
+                    stack="python",
+                    event_type="task_finished",
+                    task=current_task,
+                    attempt=1,
+                    started_at=current_task_started,
+                    duration_ms=round((time.perf_counter() - current_task_clock) * 1000, 2),
+                    status="failed",
+                    input_artifacts=current_input_artifacts,
+                    observability=current_usage,
+                    error=exc,
+                )
+            except Exception:
+                pass
+        build_time = time.time() - start_time
+        error_msg = f"Python builder failed: {exc}"
+        print(f"[Python Builder] ✗ Error: {error_msg}")
+        return {
+            "python_output": {
+                "status": "failed",
+                "error": str(exc),
+                "output_dir": str(output_dir) if output_dir else None,
+                "task_runs": task_runs,
+                "patches": [patch for run in task_runs for patch in run["patches"]],
+                "observability": observability,
+            },
+            "python_build_time": build_time,
             "errors": [error_msg],
         }

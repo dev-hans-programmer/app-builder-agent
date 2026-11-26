@@ -1,5 +1,9 @@
 # Proposed Architecture
 
+> Historical proposal: the requirements, contracts, task generation, quality, repair, and
+> traceability layers described here are now implemented. See
+> [Current Architecture](current-architecture.md). Queue-backed execution remains proposed.
+
 This document describes the next-stage architecture for building medium to complex production-grade backend projects from a PRD or detailed description.
 
 ## Goal
