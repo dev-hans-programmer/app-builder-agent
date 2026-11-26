@@ -17,13 +17,16 @@ RUN_ID = UUID("11111111-2222-3333-4444-555555555555")
 MARKER = f"[app-builder-run:{RUN_ID}]"
 
 
-def _publisher(transport: httpx.MockTransport) -> GitHubPublisher:
+def _publisher(
+    transport: httpx.MockTransport, *, include_workflows: bool = False
+) -> GitHubPublisher:
     return GitHubPublisher(
         owner="hasanali",
         token="never-log-this-token",
         visibility="private",
         author_name="Hasan Ali",
         author_email="hasan@example.com",
+        include_workflows=include_workflows,
         api_url="https://api.github.test",
         transport=transport,
     )
@@ -36,6 +39,10 @@ def test_publishes_generated_files_as_one_github_commit(tmp_path: Path) -> None:
     (source / "README.md").write_text("# Todo\n", encoding="utf-8")
     (source / ".env").write_text("SECRET=never-push\n", encoding="utf-8")
     (source / ".env.example").write_text("SECRET=\n", encoding="utf-8")
+    (source / ".github" / "workflows").mkdir(parents=True)
+    (source / ".github" / "workflows" / "ci.yml").write_text(
+        "name: CI\n", encoding="utf-8"
+    )
     blob_contents: list[bytes] = []
     created_repository: dict = {}
     created_tree: dict = {}
@@ -108,6 +115,24 @@ def test_publishes_generated_files_as_one_github_commit(tmp_path: Path) -> None:
         ".env.example",
         "README.md",
         "app/main.py",
+    }
+
+
+def test_workflow_files_are_published_only_when_enabled(tmp_path: Path) -> None:
+    source = tmp_path / "python"
+    workflow = source / ".github" / "workflows" / "ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("name: CI\n", encoding="utf-8")
+    (source / "main.py").write_text("pass\n", encoding="utf-8")
+
+    publisher = _publisher(
+        httpx.MockTransport(lambda _: httpx.Response(500)),
+        include_workflows=True,
+    )
+
+    assert {item.path for item in publisher.collect_files(source)} == {
+        ".github/workflows/ci.yml",
+        "main.py",
     }
 
 
@@ -202,5 +227,42 @@ def test_git_api_forbidden_error_identifies_permission_and_operation() -> None:
 
     message = str(captured.value)
     assert "POST /repos/hasanali/todo/git/trees" in message
+    assert "Repository access: All repositories" in message
     assert "Contents: Read and write" in message
-    assert "Workflows: Read and write" in message
+    assert "Workflows: Read and write" not in message
+
+
+def test_git_write_retries_transient_forbidden_response(monkeypatch) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(
+                403,
+                json={"message": "Resource not accessible by personal access token"},
+            )
+        return httpx.Response(201, json={"sha": "tree-sha"})
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "src.control_plane.infrastructure.github.client.asyncio.sleep", no_sleep
+    )
+
+    async def create_tree() -> httpx.Response:
+        async with _publisher(httpx.MockTransport(handler)) as publisher:
+            return await publisher._request(
+                "POST",
+                "/repos/hasanali/todo/git/trees",
+                expected={201},
+                retry_forbidden=True,
+                json={"tree": []},
+            )
+
+    response = asyncio.run(create_tree())
+
+    assert response.status_code == 201
+    assert attempts == 3

@@ -73,6 +73,11 @@ Set `CONTROL_EXECUTION_MODE=dynamic_serial` for dependency-aware task queue exec
 Set `GITHUB_OWNER` and `GITHUB_TOKEN`, then restart the worker. Successful generated Python code
 is published from `builds/python` to the repository root.
 
+Because the agent creates repositories after the token is issued, a fine-grained PAT must target
+the configured owner with **Repository access: All repositories** and grant write access for
+Repository creation and Contents. Workflow files are excluded by default. Set
+`CONTROL_GITHUB_PUBLISH_WORKFLOWS=true` only when the token also has Workflows write access.
+
 By default, failed quality gates prevent publishing. Set
 `CONTROL_PUBLISH_ON_QUALITY_FAILURE=true` to publish successfully generated code even when the
 quality gate remains failed. The run itself still remains failed and keeps its diagnostics.

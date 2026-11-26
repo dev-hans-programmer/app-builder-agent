@@ -216,6 +216,14 @@ def _chunks(items: list[Dict[str, Any]], size: int) -> list[list[Dict[str, Any]]
     return [items[index : index + size] for index in range(0, len(items), size)]
 
 
+def _feature_task_title(criteria: list[Dict[str, Any]]) -> str:
+    """Create a concise title that distinguishes chunks of the same resource."""
+    first_requirement = str(
+        criteria[0].get("requirement") or criteria[0].get("id") or "feature slice"
+    ).strip()
+    return first_requirement.rstrip(". ")
+
+
 def _build_python_production_tasks(
     requirements: Dict[str, Any],
     architecture: Dict[str, Any],
@@ -340,7 +348,7 @@ def _build_python_production_tasks(
                 {
                     "task_key": f"feature-{resource}-{feature_index:02d}",
                     "kind": "feature",
-                    "title": f"Implement {resource.replace('-', ' ')} capabilities",
+                    "title": _feature_task_title(chunk),
                     "objective": (
                         "Implement this bounded vertical slice end to end across "
                         "domain, application, persistence, API, migrations, and tests: "

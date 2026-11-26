@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -18,6 +19,31 @@ from src.control_plane.infrastructure.database.models import (
     Run,
     RunTask,
 )
+from src.control_plane.tasks import _add_run_usage
+
+
+def test_dynamic_task_usage_rolls_up_to_run() -> None:
+    run = SimpleNamespace(
+        input_tokens=100,
+        output_tokens=20,
+        cached_tokens=10,
+        estimated_cost=0.01,
+    )
+
+    _add_run_usage(
+        run,
+        {
+            "input_tokens": 200,
+            "output_tokens": 40,
+            "cached_tokens": 15,
+            "estimated_cost": 0.02,
+        },
+    )
+
+    assert run.input_tokens == 300
+    assert run.output_tokens == 60
+    assert run.cached_tokens == 25
+    assert run.estimated_cost == 0.03
 
 
 def test_dynamic_serial_scheduler_unlocks_one_dependency_at_a_time(tmp_path) -> None:

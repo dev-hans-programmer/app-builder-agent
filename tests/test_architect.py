@@ -16,6 +16,37 @@ from src.graph import create_initial_state, ensure_workspace_layout
 
 
 class TestArchitectureArtifact:
+    def test_job_role_does_not_enable_authentication(self):
+        requirements = {
+            "id": "job-tracker-requirements",
+            "summary": "Track job applications and interview rounds.",
+            "functional_requirements": [
+                "Create a job application.",
+                "Record the company for a job application.",
+                "Record the role for a job application.",
+            ],
+            "acceptance_criteria": [
+                {"id": "AC-001", "requirement": "Create a job application."},
+                {
+                    "id": "AC-002",
+                    "requirement": "Record the role for a job application.",
+                },
+            ],
+            "domain_entities": ["Job Application", "Company", "Interview Round"],
+            "non_functional_requirements": [],
+            "constraints": [],
+        }
+
+        architecture = build_architecture_artifact(requirements, "job-tracker")
+
+        assert "security" not in architecture["layers"]
+        assert "security" not in architecture["module_map"]
+        assert "user" not in architecture["primary_entities"]
+        assert not any(
+            contract["path"].startswith("/api/v1/auth/")
+            for contract in architecture["api_contracts"]
+        )
+
     def test_retrieve_individual_resource_creates_get_contract(self):
         requirements = {
             "id": "movie-requirements",

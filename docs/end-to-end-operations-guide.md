@@ -78,6 +78,13 @@ GITHUB_COMMIT_AUTHOR_NAME=Your Name
 GITHUB_COMMIT_AUTHOR_EMAIL=you@example.com
 ```
 
+For a fine-grained PAT, set its resource owner to `GITHUB_OWNER`, choose **Repository access: All
+repositories**, and grant Repository creation and Contents write permissions. “All repositories”
+includes future repositories and is necessary because this agent creates a new one for each
+project. Workflows permission is only needed with
+`CONTROL_GITHUB_PUBLISH_WORKFLOWS=true`; generated workflow files are otherwise excluded. A classic
+PAT can use `repo`, plus `workflow` when workflow publishing is enabled.
+
 Choose whether successfully published source should remain under `data/`:
 
 ```env

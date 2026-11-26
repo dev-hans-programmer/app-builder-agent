@@ -25,8 +25,15 @@ GITHUB_COMMIT_AUTHOR_EMAIL=you@example.com
 CONTROL_RETAIN_LOCAL_BUILDS=true
 ```
 
-The fine-grained token needs Repository creation (write), Contents (write), and Metadata (read).
-Add Workflows (write) when generated `.github/workflows/*` files should be published.
+For a fine-grained PAT, select the configured `GITHUB_OWNER` as the resource owner and choose
+**Repository access: All repositories**. This is required because generated repositories do not
+exist when the token is created. Grant Repository creation (write) and Contents (write); Metadata
+(read) is included automatically. Workflows (write) is only required when
+`CONTROL_GITHUB_PUBLISH_WORKFLOWS=true`; workflow files are excluded by default. A token limited to
+selected repositories can create the repository but cannot publish its generated tree.
+
+A classic PAT is also supported. It needs `repo`, plus `workflow` when workflow publishing is
+enabled.
 
 If both owner and token are absent, delivery is recorded as `skipped`. A partial configuration or
 GitHub API failure fails the run while retaining all local artifacts.
@@ -52,6 +59,10 @@ and their download endpoint returns `410 Gone`.
    database API and advances the default branch without a force push.
 5. The repository URL, branch, commit SHA, commit URL, and publication time are stored on the run.
 
+GitHub can briefly return `403` for Git database writes immediately after creating a repository
+while fine-grained-token access propagates. The publisher retries these writes with bounded
+exponential backoff; persistent permission failures still fail delivery with a specific message.
+
 Each repository description and generated commit contains the run ID. If a worker is redelivered
 after an uncertain failure, it recognizes and reuses the repository or commit created by that run.
 
@@ -61,6 +72,7 @@ The contents of `builds/python` are placed at repository root.
 
 Local `.env`, private keys/certificates, credential/secret JSON files, virtual environments, caches,
 package caches, and `.git` content are excluded. `.env.example` remains publishable.
+`.github/workflows/*` is excluded unless `CONTROL_GITHUB_PUBLISH_WORKFLOWS=true`.
 
 ## Monitoring
 

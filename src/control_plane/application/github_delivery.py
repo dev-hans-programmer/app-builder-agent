@@ -104,6 +104,7 @@ class GitHubDeliveryService:
             visibility=self.settings.github_repository_visibility,
             author_name=self.settings.github_commit_author_name,
             author_email=self.settings.github_commit_author_email,
+            include_workflows=self.settings.github_publish_workflows,
             api_url=self.settings.github_api_url,
             timeout_seconds=self.settings.github_request_timeout_seconds,
             blob_concurrency=self.settings.github_blob_concurrency,

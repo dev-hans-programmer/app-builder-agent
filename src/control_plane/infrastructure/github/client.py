@@ -63,6 +63,7 @@ class GitHubPublisher:
         visibility: str,
         author_name: str | None,
         author_email: str | None,
+        include_workflows: bool = False,
         api_url: str = "https://api.github.com",
         timeout_seconds: float = 30.0,
         blob_concurrency: int = 8,
@@ -75,6 +76,7 @@ class GitHubPublisher:
         self.visibility = visibility
         self.author_name = author_name or "app-builder-agent"
         self.author_email = author_email or "app-builder-agent@users.noreply.github.com"
+        self.include_workflows = include_workflows
         self.api_url = api_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.blob_concurrency = blob_concurrency
@@ -164,6 +166,7 @@ class GitHubPublisher:
                     "POST",
                     f"/repos/{self.owner}/{repository_name}/git/blobs",
                     expected={201},
+                    retry_forbidden=True,
                     json={
                         "content": base64.b64encode(source.content).decode("ascii"),
                         "encoding": "base64",
@@ -187,12 +190,14 @@ class GitHubPublisher:
             "POST",
             f"/repos/{self.owner}/{repository_name}/git/trees",
             expected={201},
+            retry_forbidden=True,
             json={"base_tree": head_commit["tree"]["sha"], "tree": tree_entries},
         )
         commit_response = await self._request(
             "POST",
             f"/repos/{self.owner}/{repository_name}/git/commits",
             expected={201},
+            retry_forbidden=True,
             json={
                 "message": f"Generated backend for {project_name}\n\n{marker}",
                 "tree": tree_response.json()["sha"],
@@ -208,6 +213,7 @@ class GitHubPublisher:
             "PATCH",
             f"/repos/{self.owner}/{repository_name}/git/refs/heads/{branch}",
             expected={200},
+            retry_forbidden=True,
             json={"sha": commit_sha, "force": False},
         )
         return self._result(repository, repository_name, branch, commit_sha, len(files))
@@ -292,17 +298,19 @@ class GitHubPublisher:
         *,
         expected: set[int],
         json: dict[str, Any] | None = None,
+        retry_forbidden: bool = False,
     ) -> httpx.Response:
         if self.client is None:
             raise RuntimeError(
                 "GitHubPublisher must be used as an async context manager"
             )
         response: httpx.Response | None = None
-        for attempt in range(3):
+        attempts = 7 if retry_forbidden else 3
+        for attempt in range(attempts):
             try:
                 response = await self.client.request(method, path, json=json)
             except httpx.HTTPError as error:
-                if attempt == 2:
+                if attempt == attempts - 1:
                     raise GitHubPublishingError(
                         f"GitHub request failed: {type(error).__name__}"
                     ) from error
@@ -310,7 +318,13 @@ class GitHubPublisher:
                 continue
             if response.status_code in expected:
                 return response
-            if response.status_code not in {429, 502, 503, 504} or attempt == 2:
+            retryable_statuses = {429, 502, 503, 504}
+            if retry_forbidden:
+                retryable_statuses.add(403)
+            if (
+                response.status_code not in retryable_statuses
+                or attempt == attempts - 1
+            ):
                 break
             await asyncio.sleep(0.25 * (2**attempt))
         assert response is not None
@@ -321,10 +335,14 @@ class GitHubPublisher:
         permission_hint = ""
         if response.status_code == 403 and "/git/" in path:
             permission_hint = (
-                " Configure GITHUB_TOKEN with repository Contents: Read and write;"
-                " generated .github/workflows files also require Workflows: Read and"
-                " write."
+                " Configure the fine-grained GITHUB_TOKEN for this resource owner with"
+                " Repository access: All repositories and Contents: Read and write."
             )
+            if self.include_workflows:
+                permission_hint += (
+                    " CONTROL_GITHUB_PUBLISH_WORKFLOWS=true also requires Workflows:"
+                    " Read and write."
+                )
         raise GitHubPublishingError(
             f"GitHub API returned {response.status_code} for {method} {path}: "
             f"{message[:300]}.{permission_hint}"
@@ -354,6 +372,12 @@ class GitHubPublisher:
 
     def _excluded(self, relative: Path) -> bool:
         if any(part in self._EXCLUDED_DIRECTORIES for part in relative.parts[:-1]):
+            return True
+        if (
+            not self.include_workflows
+            and len(relative.parts) >= 2
+            and relative.parts[:2] == (".github", "workflows")
+        ):
             return True
         name = relative.name.lower()
         if name == ".env" or name.startswith(".env.") and name != ".env.example":

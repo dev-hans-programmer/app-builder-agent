@@ -525,6 +525,22 @@ def _refresh_task_patch_hashes(output: dict[str, Any]) -> None:
                 patch["sha256_after"] = refreshed["sha256_after"]
 
 
+def _add_run_usage(run: Run, observability: dict[str, Any]) -> None:
+    """Roll one dynamic task attempt's model usage into its parent run."""
+    run.input_tokens = int(run.input_tokens or 0) + int(
+        observability.get("input_tokens") or 0
+    )
+    run.output_tokens = int(run.output_tokens or 0) + int(
+        observability.get("output_tokens") or 0
+    )
+    run.cached_tokens = int(run.cached_tokens or 0) + int(
+        observability.get("cached_tokens") or 0
+    )
+    run.estimated_cost = float(run.estimated_cost or 0) + float(
+        observability.get("estimated_cost") or 0
+    )
+
+
 async def _complete_run_task(
     run_id: UUID,
     task_id: UUID,
@@ -566,6 +582,7 @@ async def _complete_run_task(
         attempt.cached_tokens = int(observability.get("cached_tokens") or 0)
         attempt.estimated_cost = float(observability.get("estimated_cost") or 0)
         attempt.output = output
+        _add_run_usage(run, observability)
         session.add(
             RunEvent(
                 run_id=run.id,

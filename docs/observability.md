@@ -72,8 +72,9 @@ the run storage model.
 
 ## Cost Estimation
 
-Token usage comes from model responses. Cost remains `null` unless these
-optional rates are configured:
+Token usage comes from model responses. Recognized models use their standard
+API text-token rates automatically. These optional settings override those
+rates for custom models or other processing tiers:
 
 ```env
 OPENAI_INPUT_COST_PER_1M=0

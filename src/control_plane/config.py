@@ -50,6 +50,7 @@ class ControlPlaneSettings(BaseSettings):
             "CONTROL_GITHUB_REPOSITORY_VISIBILITY",
         ),
     )
+    github_publish_workflows: bool = False
     github_commit_author_name: str | None = Field(
         default=None,
         validation_alias=AliasChoices(

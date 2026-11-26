@@ -94,6 +94,10 @@ class TestExecutionPlanGeneration:
         ]
         assert len(feature_tasks) == 3
         assert all(len(task["acceptance_criteria_ids"]) <= 3 for task in feature_tasks)
+        assert len({task["title"] for task in feature_tasks}) == 3
+        assert feature_tasks[0]["title"].endswith("Catalog capability 1")
+        assert feature_tasks[1]["title"].endswith("Catalog capability 4")
+        assert feature_tasks[2]["title"].endswith("Catalog capability 7")
         assert {
             criterion
             for task in feature_tasks

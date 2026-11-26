@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from typing import Any
+
+
+# Standard text-token rates per 1M tokens. Environment overrides below remain
+# authoritative so deployments using another processing tier can supply it.
+_MODEL_RATES_PER_1M: dict[str, tuple[float, float, float]] = {
+    "gpt-6.2-sol": (2.0, 10.0, 0.1),
+    "gpt-4o-mini": (0.15, 0.6, 0.075),
+}
 
 
 def prompt_sha256(prompt: str) -> str:
@@ -64,24 +73,46 @@ def _finish_reason(response: Any | None) -> str | None:
     return str(value) if value is not None else None
 
 
+def _default_rates(model: str) -> tuple[float, float, float] | None:
+    normalized = model.strip().lower()
+    for model_name, rates in _MODEL_RATES_PER_1M.items():
+        if normalized == model_name or re.fullmatch(
+            rf"{re.escape(model_name)}-\d{{4}}-\d{{2}}-\d{{2}}", normalized
+        ):
+            return rates
+    return None
+
+
 def estimate_cost(
-    input_tokens: int, output_tokens: int, cached_tokens: int
+    input_tokens: int,
+    output_tokens: int,
+    cached_tokens: int,
+    *,
+    model: str = "",
 ) -> float | None:
-    """Estimate request cost from optional per-million-token environment rates."""
+    """Estimate request cost using configured overrides or known model rates."""
     rate_names = (
         "OPENAI_INPUT_COST_PER_1M",
         "OPENAI_OUTPUT_COST_PER_1M",
         "OPENAI_CACHED_INPUT_COST_PER_1M",
     )
-    if not any(os.getenv(name) for name in rate_names):
-        return None
+    configured_rates = tuple(os.getenv(name) for name in rate_names)
+    default_rates = _default_rates(model)
+    if not any(value not in {None, ""} for value in configured_rates):
+        rates = default_rates
+    else:
+        fallback_rates = default_rates or (0.0, 0.0, 0.0)
+        try:
+            rates = tuple(
+                float(value) if value not in {None, ""} else fallback_rates[index]
+                for index, value in enumerate(configured_rates)
+            )
+        except ValueError:
+            return None
 
-    try:
-        input_rate = float(os.getenv(rate_names[0], "0"))
-        output_rate = float(os.getenv(rate_names[1], "0"))
-        cached_rate = float(os.getenv(rate_names[2], "0"))
-    except ValueError:
+    if rates is None or any(rate < 0 for rate in rates):
         return None
+    input_rate, output_rate, cached_rate = rates
 
     uncached_input = max(input_tokens - cached_tokens, 0)
     total = (
@@ -121,5 +152,10 @@ def model_observability(
         "visible_output_tokens": max(output_tokens - reasoning_tokens, 0),
         "total_tokens": total_tokens,
         "finish_reason": _finish_reason(response),
-        "estimated_cost": estimate_cost(input_tokens, output_tokens, cached_tokens),
+        "estimated_cost": estimate_cost(
+            input_tokens,
+            output_tokens,
+            cached_tokens,
+            model=model,
+        ),
     }

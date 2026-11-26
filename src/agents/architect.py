@@ -59,6 +59,35 @@ def _requirements_to_text(requirements: Dict[str, Any]) -> str:
     return " ".join(part for part in parts if part).lower()
 
 
+def _needs_rbac(requirements_text: str) -> bool:
+    """Detect explicit access-control requirements without treating job roles as RBAC."""
+    explicit_markers = (
+        r"\bauth\b",
+        r"\bauthentication\b",
+        r"\bauthorization\b",
+        r"\blog[ -]?in\b",
+        r"\boauth\b",
+        r"\bpermissions?\b",
+        r"\baccess control\b",
+        r"\bown data\b",
+        r"\bowners?\b",
+        r"\badmins?\b",
+        r"\badministrators?\b",
+        r"\bmemberships?\b",
+    )
+    if any(re.search(pattern, requirements_text) for pattern in explicit_markers):
+        return True
+
+    role_contexts = (
+        r"\brole[- ]based\b",
+        r"\b(?:user|member|account|admin) roles?\b",
+        r"\busers?\b.{0,24}\broles?\b",
+        r"\broles?\s+(?:and\s+)?permissions?\b",
+        r"\bassign(?:ed|ing)?\s+(?:a\s+)?roles?\b",
+    )
+    return any(re.search(pattern, requirements_text) for pattern in role_contexts)
+
+
 def _infer_primary_entities(requirements_text: str) -> list[str]:
     entities: list[str] = []
     patterns = [
@@ -141,10 +170,7 @@ def _build_layers(requirements_text: str, entities: list[str]) -> list[str]:
         for token in ("queue", "worker", "external", "integration", "service")
     ):
         layers.append("infrastructure")
-    if any(
-        token in requirements_text
-        for token in ("auth", "login", "oauth", "role", "permission", "authorization")
-    ):
+    if _needs_rbac(requirements_text):
         layers.append("security")
     if any(
         token in requirements_text
@@ -206,10 +232,7 @@ def _build_module_map(
             "integration clients",
             "background jobs",
         ]
-    if any(
-        token in requirements_text
-        for token in ("auth", "login", "oauth", "role", "permission", "authorization")
-    ):
+    if _needs_rbac(requirements_text):
         module_map["security"] = [
             "authentication",
             "authorization",
@@ -272,10 +295,7 @@ def _build_api_contracts(
         contracts.append(
             f"Provide endpoints that manage the relationship between {entities[0]} and {entities[1]}."
         )
-    if any(
-        token in requirements_text
-        for token in ("auth", "login", "oauth", "role", "permission", "authorization")
-    ):
+    if _needs_rbac(requirements_text):
         contracts.append(
             "Expose authentication endpoints and protect state-changing routes."
         )
@@ -600,27 +620,6 @@ def _build_error_contract() -> Dict[str, Any]:
     }
 
 
-def _needs_rbac(requirements_text: str) -> bool:
-    return any(
-        marker in requirements_text
-        for marker in (
-            "auth",
-            "login",
-            "permission",
-            "permissions",
-            "role",
-            "roles",
-            "access control",
-            "authorization",
-            "owner",
-            "admin",
-            "administrator",
-            "member",
-            "membership",
-        )
-    )
-
-
 def _build_rbac_model(requirements_text: str) -> list[str]:
     if not _needs_rbac(requirements_text):
         return []
@@ -662,7 +661,7 @@ def _build_lifecycle(
         lifecycle.append(
             "Emit a clear completion response after each state transition."
         )
-    if any(token in requirements_text for token in ("auth", "login")):
+    if _needs_rbac(requirements_text):
         lifecycle.append(
             "Require authenticated context before protected lifecycle steps."
         )
@@ -673,10 +672,7 @@ def _build_lifecycle(
 
 def _build_security_strategy(requirements_text: str) -> list[str]:
     strategy: list[str] = []
-    if any(
-        token in requirements_text
-        for token in ("auth", "login", "oauth", "role", "permission", "authorization")
-    ):
+    if _needs_rbac(requirements_text):
         strategy.append(
             "Add identity and access control with explicit authentication flows."
         )
@@ -757,10 +753,7 @@ def _build_decisions(requirements_text: str, entities: list[str]) -> list[str]:
         for token in ("database", "persistence", "persist", "storage")
     ):
         decisions.append("Isolate storage concerns from the core domain flow.")
-    if any(
-        token in requirements_text
-        for token in ("auth", "login", "oauth", "role", "permission", "authorization")
-    ):
+    if _needs_rbac(requirements_text):
         decisions.append("Treat access control as a dedicated concern.")
     if not decisions:
         decisions.append(
@@ -783,10 +776,7 @@ def _build_verification_strategy(
         or "relationship" in requirements_text
     ):
         strategy.append("Add relationship checks to the verification matrix.")
-    if any(
-        token in requirements_text
-        for token in ("auth", "login", "oauth", "role", "permission", "authorization")
-    ):
+    if _needs_rbac(requirements_text):
         strategy.append("Verify authentication and authorization flows explicitly.")
     if any(
         token in requirements_text
@@ -807,12 +797,7 @@ def _build_risks(requirements_text: str) -> list[str]:
         risks.append(
             "Storage expectations remain open if the requirement did not specify a persistence model."
         )
-    if (
-        "auth" not in requirements_text
-        and "login" not in requirements_text
-        and "oauth" not in requirements_text
-        and "role" not in requirements_text
-    ):
+    if not _needs_rbac(requirements_text):
         risks.append(
             "Access control may still need clarification if the requirement introduces protected actions later."
         )

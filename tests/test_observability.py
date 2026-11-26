@@ -246,6 +246,29 @@ def test_model_usage_normalizes_tokens_and_estimates_cost(monkeypatch):
     assert metadata["estimated_cost"] == 0.00012
 
 
+def test_model_usage_uses_known_model_rates_when_overrides_are_unset(monkeypatch):
+    monkeypatch.delenv("OPENAI_INPUT_COST_PER_1M", raising=False)
+    monkeypatch.delenv("OPENAI_OUTPUT_COST_PER_1M", raising=False)
+    monkeypatch.delenv("OPENAI_CACHED_INPUT_COST_PER_1M", raising=False)
+    response = SimpleNamespace(
+        usage=SimpleNamespace(
+            prompt_tokens=1_000_000,
+            completion_tokens=1_000_000,
+            total_tokens=2_000_000,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+        )
+    )
+
+    metadata = model_observability(
+        model="gpt-6.2-sol",
+        prompt="hello",
+        prompt_version="1.0",
+        response=response,
+    )
+
+    assert metadata["estimated_cost"] == 12.0
+
+
 def test_model_backed_step_records_response_usage_and_generated_files(
     tmp_path, monkeypatch
 ):
