@@ -1,8 +1,5 @@
-run-python:
-	uv run python main.py --stack python
-
-run-node:
-	uv run python main.py --stack nodejs
+run:
+	uv run python main.py
 
 deps-up:
 	docker compose -f docker-compose.control-plane.yml up -d

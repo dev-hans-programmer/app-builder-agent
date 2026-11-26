@@ -214,7 +214,7 @@ async def _execute_run(run_id: UUID, task_id: str, *, resume: bool) -> str:
     workspace = artifact_store.run_root(project.id, run.id)
     config = {"configurable": {"thread_id": str(run.id)}}
     try:
-        if run.execution_mode != "legacy" and run.target_stack == "python":
+        if run.execution_mode != "legacy":
             return await _prepare_dynamic_run(
                 run=run,
                 project=project,
@@ -235,7 +235,6 @@ async def _execute_run(run_id: UUID, task_id: str, *, resume: bool) -> str:
                         run.request,
                         project.slug,
                         clarification_gate_enabled=run.clarification_gate_enabled,
-                        target_stack=run.target_stack,
                         workspace_root=workspace,
                         job_id=f"job-{run.id}",
                         run_id=str(run.id),
@@ -320,7 +319,6 @@ async def _prepare_dynamic_run(
                     run.request,
                     project.slug,
                     clarification_gate_enabled=run.clarification_gate_enabled,
-                    target_stack=run.target_stack,
                     workspace_root=workspace,
                     job_id=f"job-{run.id}",
                     run_id=str(run.id),
@@ -890,15 +888,7 @@ def _should_attempt_github_delivery(
     if quality.get("passed") is not False:
         return False
 
-    target_stack = state.get("target_stack", "both")
-    selected_outputs = []
-    if target_stack in {"python", "both"}:
-        selected_outputs.append(state.get("python_output") or {})
-    if target_stack in {"nodejs", "both"}:
-        selected_outputs.append(state.get("nodejs_output") or {})
-    return bool(selected_outputs) and all(
-        output.get("status") == "success" for output in selected_outputs
-    )
+    return (state.get("python_output") or {}).get("status") == "success"
 
 
 def _failure_from_state(state: dict[str, Any]) -> tuple[str, str]:
@@ -927,16 +917,7 @@ def _failure_from_state(state: dict[str, Any]) -> tuple[str, str]:
             "; ".join(missing) or "Requirement traceability did not pass",
         )
 
-    selected_outputs = []
-    target_stack = state.get("target_stack", "both")
-    if target_stack in {"python", "both"}:
-        selected_outputs.append(state.get("python_output") or {})
-    if target_stack in {"nodejs", "both"}:
-        selected_outputs.append(state.get("nodejs_output") or {})
-    incomplete = next(
-        (output for output in selected_outputs if output.get("status") != "success"),
-        {},
-    )
+    incomplete = state.get("python_output") or {}
     return (
         "GenerationIncomplete",
         str(

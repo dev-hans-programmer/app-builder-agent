@@ -174,7 +174,6 @@ class ArtifactManifest(TypedDict, total=False):
     run_summary_path: str
     artifact_manifest_path: str
     steps_dir: str
-    comparison_report_markdown: str
     policy_snapshot_markdown: str
     quality_report_markdown: str
     policy_compliance_report_markdown: str

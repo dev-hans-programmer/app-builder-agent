@@ -1,97 +1,47 @@
-# Dual-Stack Backend Builder Agent
+# Python Project Builder Agent
 
-AI-powered agent that generates backend applications in both Python (FastAPI) and Node.js (Express) from a single prompt, then provides intelligent comparison.
+An AI-powered agent that turns a product request into a production-oriented Python/FastAPI
+project. It owns one delivery path only: requirements, architecture, Python generation,
+verification, repair, traceability, and optional GitHub publishing.
 
-## Features
+## Capabilities
 
-- 🐍 **Python/FastAPI** code generation
-- 🟢 **Node.js/Express** code generation
-- ⚡ **Parallel execution** of both builders
-- 📊 **Intelligent comparison** and recommendation
-- 🔎 **Run-scoped observability** with step attempts and artifact hashes
-- 🧭 **Gated generation pipeline** with approved criteria, API/data contracts, task patches,
-  quality checks, targeted repair, and requirement traceability
-- 🏗️ **Policy-driven Python generation** from the versioned `backend-prompt.md`, with clean
-  architecture tasks and a mandatory compliance report
-- 🤖 **Powered by OpenAI**
-- 🎯 **LangGraph orchestration**
-- 📨 **Durable queue execution** with RabbitMQ quorum queues, transactional outbox, leases, and
-  PostgreSQL checkpoints
-- 🌐 **FastAPI control plane** with 19 project/run/monitoring operations and replayable SSE logs
-- 🚚 **GitHub delivery** with collision-safe repository naming and idempotent generated-code commits
+- Python 3.13 and FastAPI project generation
+- Approved acceptance criteria, API/data contracts, and executable task planning
+- Versioned Python production policy from `backend-prompt.md`
+- Build, Ruff, mypy, pytest, migration, smoke, and container checks
+- Bounded model-assisted repair and requirement traceability
+- Run-scoped checkpoints, events, readable diagnostics, and artifact hashes
+- FastAPI control plane with PostgreSQL, RabbitMQ, Redis, Celery, and SSE monitoring
+- Collision-safe, idempotent GitHub repository delivery
 
-## Setup
+## Local CLI
 
-### Prerequisites
+Prerequisites: Python 3.11+, `uv`, and an OpenAI API key.
 
-- Python 3.11 or higher
-- An OpenAI API key
-- Docker with Compose for PostgreSQL, RabbitMQ, and Redis when using the API
+```bash
+cp .env.example .env
+# Set OPENAI_API_KEY in .env
+uv sync --all-extras
+uv run python main.py
+```
 
-### Installation
+The CLI asks for the project request and project name. Every run produces Python; there is no
+language or framework selection flag.
 
-1. **Clone the repository** (or navigate to project directory)
+Useful commands:
 
-2. **Install dependencies:**
-   ```bash
-   pip install -e .
-   ```
-
-   Or with uv:
-   ```bash
-   uv venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   uv pip install -e .
-   ```
-
-3. **Configure environment:**
-   ```bash
-   cp .env.example .env
-   # Edit .env and add your OPENAI_API_KEY
-   ```
-
-4. **Run the agent:**
-   ```bash
-   python main.py
-   ```
-
-   Generate only one stack when a comparison is not needed:
-
-   ```bash
-   uv run python main.py --stack python
-   uv run python main.py --stack nodejs
-   ```
-
-   `--stack both` remains the default and runs both builders in parallel.
-
-
-RabbitMQ UI: http://127.0.0.1:15672
-Login: app_builder / app_builder
-
-## Usage
-
-When you run the agent, you'll be prompted to:
-1. Describe the backend application you want to build
-2. Provide a project name
-
-The agent will then generate the selected implementation. When `--stack both`
-is selected, it also compares the two implementations and provides a detailed
-comparison report.
-
-See [Generation Pipeline](docs/generation-pipeline.md) for the artifacts, quality gates,
-repair behavior, and completion rules used by every run.
-
-Python runs always load `backend-prompt.md` before requirement analysis. To keep the policy in a
-different location, set `BACKEND_POLICY_PATH`; the selected file is hashed and copied into the
-project's `policy/` directory for reproducibility. Node.js-only runs do not load or apply it.
+```bash
+uv run python main.py --status
+uv run python main.py --resume
+uv run python main.py --no-clarification-gate
+```
 
 ## Durable API and workers
 
 ```bash
-cp .env.example .env              # add OPENAI_API_KEY
-uv sync --all-extras
-make deps-up                      # PostgreSQL, RabbitMQ, Redis
-make db-migrate                   # async Alembic + LangGraph checkpoint schema
+make deps-up
+make db-migrate
 ```
 
 Run these in separate terminals:
@@ -102,101 +52,66 @@ make run-worker
 make run-beat
 ```
 
-`make run-api` is the stable mode and does not reload when generated files are written under
-`data/`. For control-plane development, use `make run-api-dev`; its reloader watches only `src/`
-and has a bounded graceful-shutdown timeout for open SSE connections.
+Open `http://127.0.0.1:8080/docs`. Generated files are stored in isolated workspaces under
+`data/projects/<project-id>/runs/<run-id>/builds/python/`.
 
-Open `http://127.0.0.1:8080/docs`. PostgreSQL is the status/event source of truth; live run events
-are available at `/api/v1/runs/{run_id}/events/stream`. Generated files use local run-isolated
-storage under `data/`; no S3 dependency is required.
+Create a run with a project request; no stack field is accepted or required:
 
-Set `CONTROL_EXECUTION_MODE=dynamic_serial` to enable dependency-aware Python feature tasks with
-task-level queueing, retries, leases, progress, and attempts. Keep `legacy` during rollout. See
-[Dynamic task architecture](docs/dynamic-task-architecture.md).
-
-To publish successful builds, configure `GITHUB_OWNER`, `GITHUB_TOKEN`, visibility, and commit author
-values in `.env`, then restart the worker. See [GitHub delivery](docs/github-delivery.md).
-Set `CONTROL_RETAIN_LOCAL_BUILDS=false` to remove `builds/` only after GitHub publishing succeeds;
-run/step/event metadata and readable diagnostics remain available.
-
-Architecture and contracts:
-
-- [End-to-end operations guide](docs/end-to-end-operations-guide.md)
-- [Control-plane architecture](docs/control-plane-architecture.md)
-- [API contracts](docs/control-plane-api-contracts.md)
-- [Data model](docs/control-plane-data-model.md)
-- [Data flow](docs/control-plane-data-flow.md)
-- [GitHub delivery](docs/github-delivery.md)
-- [Dynamic task architecture](docs/dynamic-task-architecture.md)
-- [Dynamic task data model](docs/dynamic-task-data-model.md)
-- [Dynamic task queue flow](docs/dynamic-task-queue-flow.md)
-
-### Example
-
-```bash
-$ python main.py
-
-What backend app do you want to build?
-> Build a REST API for a todo app with authentication
-
-Project name:
-> todo-api
-
-[Phase 1] Launching 2 builder agents in parallel...
-[Phase 2] Launching comparison agent...
-
-✓ Generated Apps:
-  - ./builds/python-todo-api/
-  - ./builds/nodejs-todo-api/
-
-📊 Comparison Report: ./reports/comparison-2026-02-13T10:30:45.md
+```json
+{
+  "request": "Build a production movie catalog API",
+  "clarification_gate_enabled": false,
+  "idempotency_key": "movie-catalog-v1"
+}
 ```
 
-## Project Structure
+Set `CONTROL_EXECUTION_MODE=dynamic_serial` for dependency-aware task queue execution. The
+`legacy` mode runs the same Python workflow in a single worker task.
 
-```
-app-builder-agent/
-├── src/
-│   ├── agents/          # Builder and comparison agents
-│   ├── graph/           # LangGraph workflow
-│   ├── control_plane/   # Async API, services, persistence, queue, and artifact adapters
-│   ├── observability/   # Run events, step artifacts, usage, and summaries
-│   ├── policy/          # Python backend policy loading and task section selection
-│   ├── prompts/         # Prompt templates
-│   └── utils/           # Utilities
-├── builds/              # Generated applications
-├── reports/             # Comparison reports
-├── projects/            # Generated projects and run traces
-├── features/            # Feature specs (spec-driven development)
-└── docs/                # Documentation (PRD, TRD)
+## GitHub delivery
+
+Set `GITHUB_OWNER` and `GITHUB_TOKEN`, then restart the worker. Successful generated Python code
+is published from `builds/python` to the repository root.
+
+By default, failed quality gates prevent publishing. Set
+`CONTROL_PUBLISH_ON_QUALITY_FAILURE=true` to publish successfully generated code even when the
+quality gate remains failed. The run itself still remains failed and keeps its diagnostics.
+
+Set `CONTROL_RETAIN_LOCAL_BUILDS=false` to remove local build bytes only after a confirmed GitHub
+commit.
+
+## Workflow
+
+```text
+request
+  → Python policy snapshot
+  → requirement analysis and acceptance approval
+  → architecture and contracts
+  → specification and task planning
+  → Python project generation
+  → quality gate ↔ bounded targeted repair
+  → requirement traceability
+  → delivery report
+  → optional GitHub publishing
 ```
 
 ## Development
 
-### Running Tests
-
 ```bash
-pytest tests/ -v
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest -q
 ```
 
-### Code Formatting
+## Documentation
 
-```bash
-black src/ tests/
-ruff check src/ tests/
-```
-
-## Project Status
-
-Implemented: stack-selective generation, approved acceptance artifacts, architecture/API/data
-contracts, Python production-policy enforcement, executable task generation, task-level patches,
-quality gates, bounded repair, traceability, checkpoints, run observability, durable queue workers,
-and the FastAPI control plane.
+- [User guide](docs/user-guide.md)
+- [Current architecture](docs/current-architecture.md)
+- [Generation pipeline](docs/generation-pipeline.md)
+- [End-to-end operations guide](docs/end-to-end-operations-guide.md)
+- [Control-plane API](docs/control-plane-api-contracts.md)
+- [GitHub delivery](docs/github-delivery.md)
 
 ## License
 
 MIT
-
-## Contributing
-
-This is a learning project. Feel free to explore and experiment!

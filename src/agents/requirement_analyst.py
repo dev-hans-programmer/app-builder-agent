@@ -252,7 +252,6 @@ def _model_requirement_analysis(
     policy = state.get("backend_policy") or {}
     enabled = (
         policy.get("enabled")
-        and state.get("target_stack", "both") in {"python", "both"}
         and os.getenv("OPENAI_API_KEY")
         and os.getenv("REQUIREMENTS_MODEL_ENABLED", "true").lower()
         not in {"0", "false", "no", "off"}
@@ -356,9 +355,7 @@ def _extract_constraints(text: str) -> list[str]:
     lowered = text.lower()
     if "must use" in lowered or "use " in lowered:
         constraints.append(text.strip())
-    if any(
-        language in lowered for language in ("fastapi", "express", "python", "node.js")
-    ):
+    if any(language in lowered for language in ("fastapi", "python")):
         constraints.append("Specific implementation stack was mentioned.")
     return constraints
 

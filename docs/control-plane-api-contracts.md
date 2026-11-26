@@ -44,7 +44,6 @@ Create body:
 ```json
 {
   "request": "Build a Todo backend with authentication and owned todos",
-  "target_stack": "python",
   "execution_mode": "dynamic_serial",
   "clarification_gate_enabled": false,
   "idempotency_key": "client-request-0182"

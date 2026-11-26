@@ -10,13 +10,7 @@ from src.graph.state import BuilderState
 
 
 def _selected_outputs(state: BuilderState) -> list[tuple[str, dict[str, Any]]]:
-    target = state.get("target_stack", "both")
-    outputs: list[tuple[str, dict[str, Any]]] = []
-    if target in {"python", "both"}:
-        outputs.append(("python", state.get("python_output") or {}))
-    if target in {"nodejs", "both"}:
-        outputs.append(("nodejs", state.get("nodejs_output") or {}))
-    return outputs
+    return [("python", state.get("python_output") or {})]
 
 
 def build_traceability_result(state: BuilderState) -> dict[str, Any]:

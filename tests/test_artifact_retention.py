@@ -35,7 +35,6 @@ def test_published_builds_are_removed_but_metadata_and_diagnostics_remain(
             run = Run(
                 project_id=project.id,
                 request="Build Todo",
-                target_stack="python",
                 status="running",
             )
             session.add(run)

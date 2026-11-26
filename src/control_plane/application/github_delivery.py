@@ -113,12 +113,7 @@ class GitHubDeliveryService:
 
     @staticmethod
     def _delivery_source(workspace: Path, state: dict[str, Any]) -> tuple[Path, str]:
-        target_stack = str(state.get("target_stack") or "both")
-        if target_stack == "python":
-            return workspace / "builds" / "python", "python"
-        if target_stack == "nodejs":
-            return workspace / "builds" / "nodejs", "nodejs"
-        return workspace / "builds", "both"
+        return workspace / "builds" / "python", "python"
 
     async def _record_started(
         self, run_id: UUID, *, repository_name: str, delivery_stack: str

@@ -38,12 +38,12 @@ def _repair_prompt(
     failures: list[dict[str, Any]],
     current_files: dict[str, str],
 ) -> str:
-    framework = "Python/FastAPI" if stack == "python" else "Node.js/Express"
+    framework = "Python/FastAPI"
     policy = state.get("backend_policy") or {}
     policy_text = (
         policy_text_for_task(policy, "repair")
-        if stack == "python" and policy.get("enabled")
-        else "No stack-specific production policy applies."
+        if policy.get("enabled")
+        else "No production policy applies."
     )
     output_contract = (
         """Return JSON only, without Markdown, using this exact envelope:
@@ -53,7 +53,7 @@ def _repair_prompt(
   "policy_rule_ids": [],
   "files": [{"path": "relative/path", "content": "complete file contents"}]
 }"""
-        if stack == "python" and policy.get("enabled")
+        if policy.get("enabled")
         else """Return complete contents for every changed or new file using exactly:
 ```filename: path/to/file
 [complete file contents]
@@ -138,7 +138,7 @@ def repair_failed_checks(state: BuilderState) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
 
     for stack, checks in failed:
-        output_key = "python_output" if stack == "python" else "nodejs_output"
+        output_key = "python_output"
         output = dict(state.get(output_key) or {})
         output_dir = Path(
             output.get("output_dir") or Path(manifest["builds_dir"]) / stack
@@ -187,8 +187,7 @@ def repair_failed_checks(state: BuilderState) -> dict[str, Any]:
             require_visible_completion(content, response, options)
             files = (
                 parse_generation_response(content)[0]
-                if stack == "python"
-                and (state.get("backend_policy") or {}).get("enabled")
+                if (state.get("backend_policy") or {}).get("enabled")
                 else parse_code_blocks(content)
             )
             if not files:

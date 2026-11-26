@@ -60,7 +60,7 @@ class RunService:
             project_id=project.id,
             retry_of_id=retry_of_id,
             request=command.request.strip(),
-            target_stack=command.target_stack,
+            target_stack="python",
             execution_mode=execution_mode,
             clarification_gate_enabled=command.clarification_gate_enabled,
             idempotency_key=command.idempotency_key,
@@ -76,7 +76,7 @@ class RunService:
             "queued",
             "Run accepted and awaiting durable dispatch",
             {
-                "target_stack": run.target_stack,
+                "language": "python",
                 "execution_mode": run.execution_mode,
             },
         )

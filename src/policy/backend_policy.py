@@ -161,23 +161,10 @@ def _render_policy_readme(policy: dict[str, Any]) -> str:
 
 
 def load_backend_policy(state: BuilderState) -> dict[str, Any]:
-    """Load and snapshot the canonical policy for Python generation only."""
-    target_stack = state.get("target_stack", "both")
+    """Load and snapshot the canonical Python production policy."""
     manifest = state.get("artifacts") or ensure_workspace_layout(
         ".", project_name=state.get("project_name")
     )
-    if target_stack not in {"python", "both"}:
-        return {
-            "backend_policy": {
-                "enabled": False,
-                "stack": "python",
-                "reason": "The Python production policy is not applied to Node.js-only runs.",
-            },
-            "artifacts": manifest,
-            "current_phase": "policy_loading",
-            "job_status": "running",
-        }
-
     source_path = _source_path()
     content = source_path.read_text(encoding="utf-8")
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()

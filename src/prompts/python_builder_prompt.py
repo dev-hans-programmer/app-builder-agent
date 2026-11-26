@@ -2,7 +2,7 @@
 Prompt template for Python/FastAPI builder agent.
 
 This module contains the system prompt and helper functions for generating
-prompts to Claude API for Python backend code generation.
+prompts to the configured OpenAI model for Python backend code generation.
 """
 
 import json
@@ -48,14 +48,14 @@ def create_python_prompt(
     Create the full prompt for Python/FastAPI builder.
 
     Combines the system prompt with the user's specific request and project name
-    to create a complete prompt for Claude API.
+    to create a complete Python generation prompt.
 
     Args:
         user_prompt: User's description of the app to build
         project_name: Sanitized project name
 
     Returns:
-        Complete prompt string ready for Claude API
+        Complete prompt string ready for the configured model
 
     Example:
         >>> prompt = create_python_prompt(

@@ -35,8 +35,9 @@ class ProjectResponse(ApiModel):
 
 
 class RunCreate(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+
     request: str = Field(min_length=1)
-    target_stack: Literal["python", "nodejs", "both"] = "python"
     clarification_gate_enabled: bool = False
     idempotency_key: str | None = Field(default=None, max_length=160)
     execution_mode: Literal["legacy", "dynamic_serial", "dynamic_parallel"] | None = (
@@ -49,7 +50,6 @@ class RunResponse(ApiModel):
     project_id: UUID
     retry_of_id: UUID | None
     request: str
-    target_stack: str
     execution_mode: str
     clarification_gate_enabled: bool
     status: str

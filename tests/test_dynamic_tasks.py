@@ -34,7 +34,6 @@ def test_dynamic_serial_scheduler_unlocks_one_dependency_at_a_time(tmp_path) -> 
                 run = Run(
                     project_id=project.id,
                     request="Build a catalog",
-                    target_stack="python",
                     execution_mode="dynamic_serial",
                     status="running",
                     phase="planning",

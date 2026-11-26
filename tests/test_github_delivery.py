@@ -66,7 +66,6 @@ def test_delivery_records_repository_and_auditable_events(tmp_path: Path) -> Non
             run = Run(
                 project_id=project.id,
                 request="Build Todo",
-                target_stack="python",
                 status="running",
             )
             session.add(run)
@@ -85,7 +84,7 @@ def test_delivery_records_repository_and_auditable_events(tmp_path: Path) -> Non
         published = await service.deliver(
             run_id=run_id,
             project=project,
-            state={"target_stack": "python"},
+            state={},
             workspace=workspace,
         )
         assert published is True

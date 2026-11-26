@@ -18,12 +18,11 @@ requirements
 
 ## Python production policy
 
-For `--stack python` and the Python branch of `--stack both`, the canonical
-`backend-prompt.md` is loaded before requirement analysis. Its SHA-256 digest and exact contents
+The canonical `backend-prompt.md` is loaded before requirement analysis. Its SHA-256 digest and exact contents
 are snapshotted into `projects/<project>/policy/`, so every later prompt and report can identify
-the policy version used for that run. The policy is not injected into Node.js generation.
+the policy version used for that run.
 
-Requirement analysis stays stack-neutral. The policy first becomes binding in the Python
+The policy first becomes binding in the Python
 architecture blueprint, which records mandatory clean-architecture boundaries and explicit
 include/omit decisions for conditional components such as Redis and workers. Python execution uses
 dedicated `PY-TASK-###` tasks for the foundation, platform, authentication when requested,

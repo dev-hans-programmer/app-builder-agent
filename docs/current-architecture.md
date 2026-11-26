@@ -1,113 +1,73 @@
 # Current Architecture
 
-This document describes the implemented architecture of `app-builder-agent`.
+`app-builder-agent` has one responsibility: create verified Python/FastAPI projects from product
+requests. The CLI and durable API both execute the same Python-only LangGraph workflow.
 
-## Overview
-
-The project has two entry points over the same LangGraph generation workflow: the original CLI and
-a durable FastAPI control plane. It turns one submitted backend requirement into one or two verified
-implementations:
-
-- Python with FastAPI
-- Node.js with Express
-
-`--stack python|nodejs|both` controls generation. Only dual-stack runs invoke the comparison
-agent. Every online run must pass post-generation quality and requirement traceability gates
-before it is marked complete.
-
-## Workflow Graph
+## Workflow graph
 
 ```text
 parse input
+  → load Python production policy
   → requirement analysis
-  → optional explicit clarification handling
+  → optional clarification handling
   → acceptance approval
-  → architecture and contracts
-  → spec decomposition
+  → architecture and API/data contracts
+  → specification decomposition
   → executable task planning
-  → selected builder branch(es)
-  → quality gate ──failed──→ targeted repair ──→ quality gate (maximum two repairs)
-  → traceability gate
-  → optional dual-stack comparison
-  → final report
+  → Python builder
+  → quality gate ──failed──→ targeted repair ──→ quality gate
+  → requirement traceability
+  → final delivery report
 ```
 
-The Python and Node.js builders fan out from planning and join at one quality gate. This prevents
-verification from running before generated code exists.
+The repair loop is bounded at two attempts by default. A failed quality or traceability gate keeps
+the run failed. When `CONTROL_PUBLISH_ON_QUALITY_FAILURE=true`, successfully generated Python code
+may still be delivered to GitHub after a quality failure.
 
-## Requirements and Contracts
+## Planning and generation
 
-`requirement_analyst.py` creates normalized functional and non-functional requirements plus stable
-`AC-###` acceptance IDs. `approve_acceptance_criteria()` freezes the submitted request as the
-approved baseline without generic questions.
+The requirement analyst creates normalized requirements and stable `AC-###` identifiers. The
+architect creates technical boundaries and `API-###`/`DATA-###` contracts. The planner reduces
+these artifacts to dependency-ordered `TASK-###` items.
 
-`architect.py` creates:
+The Python builder makes one model request per executable task and applies complete-file patches
+inside `builds/python`. Each patch records before/after hashes, acceptance criteria, and contract
+IDs. Absolute paths and traversal outside the build root are rejected.
 
-- the technical design and module boundaries
-- structured `API-###` endpoint contracts
-- structured `DATA-###` entity contracts
-- the shared `ERROR-001` error response contract
+## Verification
 
-Every contract links back to acceptance IDs.
+The quality gate executes generated-project checks without a shell and records the command, exit
+code, duration, and bounded diagnostics. Production-policy runs cover dependency locking,
+compilation, Ruff formatting/linting, mypy, pytest, Alembic heads, application smoke import, and
+optional Compose validation.
 
-## Planning and Generation
+Targeted repair receives only the failed checks, approved contracts, policy, and current Python
+files. Traceability requires contract, task, patch, test, and passing-quality evidence for every
+approved acceptance criterion.
 
-`spec_generator.py` produces human-readable per-module specifications. `planner.py` reduces these
-to ordered `TASK-###` work items with dependencies, acceptance IDs, contract IDs, and verification
-categories.
+## Persistence and execution
 
-Each selected builder performs one model request per executable task. Later requests receive a
-bounded snapshot of files produced by earlier tasks. Model output is parsed as complete-file
-patches; each patch stores its operation and before/after SHA-256 hashes. Absolute paths and path
-traversal outside the stack build directory are rejected.
-
-The builder step aggregates token and cost information across task calls while retaining readable
-per-task prompts and responses in the run diagnostics.
-
-## Verification and Repair
-
-`quality_gate.py` runs commands without a shell and records command, exit code, duration, and
-bounded diagnostics. It evaluates build, lint, type, test, and smoke categories. Tests and smoke
-checks are required; lint and type checks are skipped only when their tools are not available or
-configured.
-
-`targeted_repair.py` sends only failed check evidence and current files to the model. Complete-file
-repair patches are applied and the graph reruns every quality check. The loop is bounded at two
-repair attempts.
-
-`traceability.py` requires each approved criterion to have contract, executable-task, per-stack
-patch, generated-test, and passing quality evidence. A failed traceability gate yields a failed
-delivery.
-
-## State and Persistence
-
-`BuilderState` carries normalized artifacts, selected stack outputs, quality history, repair
-history, traceability results, and durable job metadata. CLI runs retain filesystem checkpoints.
-Queued runs use LangGraph's async PostgreSQL checkpointer with the run ID as the thread ID.
-
-Project artifacts live under `projects/<project>/`:
+CLI runs use filesystem checkpoints. API runs use PostgreSQL for control-plane state and
+LangGraph checkpoints, RabbitMQ/Celery for durable execution, Redis for best-effort live event
+notifications, and the filesystem for generated artifacts.
 
 ```text
-requirements/   approved problem and acceptance baseline
-architecture/   technical, API, and data contracts
-specs/          per-module specifications
-plans/          executable task plan
-builds/         generated Python and/or Node.js applications
-verification/   quality gate report
-repairs/        targeted repair attempts
-reports/        traceability, comparison, and delivery reports
-checkpoints/    resumable state snapshots
-runs/           human-readable and machine-readable run diagnostics
+requirements/   approved requirements and acceptance criteria
+policy/         immutable Python production-policy snapshot
+architecture/   technical design and contracts
+specs/          executable specifications
+plans/          dependency-ordered task plan
+builds/python/  generated project
+verification/   quality and policy-compliance evidence
+repairs/        bounded repair attempts
+reports/        traceability and delivery summaries
+checkpoints/    resumable workflow state
+steps/          readable per-step diagnostics
+_machine/       event-derived machine metadata
 ```
 
-## Observability
+## Delivery
 
-Every graph node is instrumented. `runs/<run_id>/events.jsonl` is the append-only event stream;
-`README.md`, `timeline.md`, and `steps/*.md` are the human debugging surface. Model steps include
-prompt version/hash, token use, estimated cost when rates are configured, task prompts/responses,
-input/output artifacts, hashes, retry reasons, and error diagnostics.
-
-API runs additionally mirror every event and step attempt into PostgreSQL. RabbitMQ/Celery provides
-at-least-once delivery, a transactional outbox prevents database/broker gaps, worker leases recover
-lost executions, and SSE provides cursor-based live replay. See
-[Durable Control-Plane Architecture](control-plane-architecture.md).
+GitHub delivery publishes the contents of `builds/python` at repository root. Repository and
+commit references are stored on the run. Local generated bytes can be removed only after GitHub
+confirms the commit.
