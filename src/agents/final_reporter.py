@@ -26,6 +26,8 @@ def build_delivery_summary(state: Dict[str, Any]) -> str:
     target_stack = state.get("target_stack", "both")
     quality = state.get("quality_results") or {}
     traceability = state.get("traceability_result") or {}
+    policy = state.get("backend_policy") or {}
+    policy_result = traceability.get("policy") or {}
 
     python_status = (
         python_output.get("status", "n/a")
@@ -56,6 +58,14 @@ def build_delivery_summary(state: Dict[str, Any]) -> str:
         f"- Python output: {python_status}",
         f"- Node.js output: {nodejs_status}",
         "",
+        "## Python Production Policy",
+        f"- Enabled: {str(policy.get('enabled', False)).lower()}",
+        f"- Version: {policy.get('version', 'n/a')}",
+        f"- SHA-256: {policy.get('sha256', 'n/a')}",
+        f"- Compliance: {policy_result.get('status', 'not evaluated')}",
+        f"- Snapshot: {artifacts.get('policy_snapshot_markdown', '')}",
+        f"- Compliance report: {policy_result.get('compliance_report', '')}",
+        "",
         "## Execution",
         f"- Ordered specs: {len(execution_plan.get('ordered_specs', []))}",
         f"- Executable tasks: {len(execution_plan.get('tasks', []))}",
@@ -79,6 +89,7 @@ def build_delivery_summary(state: Dict[str, Any]) -> str:
         f"- Report: {traceability.get('artifact_path', '')}",
         "",
         "## Artifacts",
+        f"- Policy: {artifacts.get('policy_dir', '')}",
         f"- Requirements: {artifacts.get('requirements_dir', '')}",
         f"- Architecture: {artifacts.get('architecture_dir', '')}",
         f"- Specs: {artifacts.get('specs_dir', '')}",

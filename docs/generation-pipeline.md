@@ -5,6 +5,7 @@ because a model returned files.
 
 ```text
 requirements
+  → Python production policy snapshot (Python runs only)
   → approved acceptance criteria
   → architecture and contracts
   → executable tasks
@@ -14,6 +15,23 @@ requirements
   → requirement traceability gate
   → completed delivery
 ```
+
+## Python production policy
+
+For `--stack python` and the Python branch of `--stack both`, the canonical
+`backend-prompt.md` is loaded before requirement analysis. Its SHA-256 digest and exact contents
+are snapshotted into `projects/<project>/policy/`, so every later prompt and report can identify
+the policy version used for that run. The policy is not injected into Node.js generation.
+
+Requirement analysis stays stack-neutral. The policy first becomes binding in the Python
+architecture blueprint, which records mandatory clean-architecture boundaries and explicit
+include/omit decisions for conditional components such as Redis and workers. Python execution uses
+dedicated `PY-TASK-###` tasks for the foundation, platform, authentication when requested,
+business vertical slices, and delivery.
+
+Each Python task receives only the policy sections relevant to its purpose and must return a JSON
+envelope containing its task ID, acceptance IDs, policy rule IDs, and complete changed files.
+Incorrect IDs and writes outside the task's declared paths are rejected before files are applied.
 
 ## 1. Requirements and acceptance approval
 
@@ -35,13 +53,16 @@ Architecture is derived after acceptance approval. Human-readable artifacts are 
 - `architecture/technical-design.md` — layers, modules, boundaries, decisions, and risks
 - `architecture/api-contracts.md` — method, path, schemas, statuses, and acceptance links
 - `architecture/data-contracts.md` — entity fields and acceptance links
+- `architecture/python-production-architecture.md` — Python policy version, mandatory structure,
+  dependency rules, deliverables, and conditional infrastructure decisions
 
 Contract IDs (`API-###`, `DATA-###`, and `ERROR-001`) are carried into implementation tasks and
 model prompts. They are generation constraints, not background prose.
 
 ## 3. Executable tasks and task-level patches
 
-Specs are reduced to ordered `TASK-###` records in `plans/tasks.md`. A task records its module,
+Specs are reduced to ordered `TASK-###` records in `plans/tasks.md`. Python policy runs also have
+ordered `PY-TASK-###` records. A task records its module,
 objective, dependencies, acceptance IDs, contract IDs, and required verification categories.
 
 Each selected stack receives one model request per executable task. Every request includes the
@@ -69,6 +90,14 @@ bounded stdout/stderr for each stack. The gate covers:
 - automated tests (required)
 - application import/syntax smoke check (required)
 
+For policy-driven Python runs, dependency locking, Ruff formatting, Ruff linting, mypy, pytest,
+Alembic heads, and application import are mandatory. A deterministic architecture validator also
+checks required deliverables, dependency declarations, layer-import rules, centralized errors,
+versioned routes, health endpoints, settings, telemetry, metrics, PostgreSQL, container posture,
+conditional-infrastructure decisions, and authentication evidence when authentication is in the
+approved contracts. Its actionable findings are written to
+`verification/python-policy-compliance.md` and participate in the repair loop.
+
 Missing optional tools are shown as skipped. Missing tests or application entry points fail the
 gate. Commands run without a shell and model/API secrets are removed from the subprocess
 environment.
@@ -94,7 +123,7 @@ continues to traceability as a failed delivery; it does not report success.
 
 An online generation completes successfully only when all selected builders succeeded, required
 quality checks passed, generated tests are linked, and every approved criterion has complete
-evidence. The final
+evidence. A Python policy run must also have a passing policy-compliance result. The final
 `reports/delivery-summary.md` links the outcome and run diagnostics.
 
 ## Run diagnostics

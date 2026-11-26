@@ -21,11 +21,11 @@ class TestParseCodeBlocks:
 
     def test_single_file(self):
         """Test parsing a single code block."""
-        content = '''
+        content = """
 ```filename: main.py
 print("hello world")
 ```
-        '''
+        """
         files = parse_code_blocks(content)
 
         assert len(files) == 1
@@ -34,7 +34,7 @@ print("hello world")
 
     def test_multiple_files(self):
         """Test parsing multiple code blocks."""
-        content = '''
+        content = """
 ```filename: main.py
 print("hello")
 ```
@@ -47,7 +47,7 @@ def helper():
 ```filename: config.py
 DEBUG = True
 ```
-        '''
+        """
         files = parse_code_blocks(content)
 
         assert len(files) == 3
@@ -68,7 +68,7 @@ DEBUG = True
 
     def test_code_block_without_filename(self):
         """Test that code blocks without filename marker are ignored."""
-        content = '''
+        content = """
 ```python
 # This block has no filename marker
 print("ignored")
@@ -77,7 +77,7 @@ print("ignored")
 ```filename: main.py
 print("included")
 ```
-        '''
+        """
         files = parse_code_blocks(content)
 
         assert len(files) == 1
@@ -86,7 +86,7 @@ print("included")
 
     def test_nested_paths(self):
         """Test parsing code blocks with nested directory paths."""
-        content = '''
+        content = """
 ```filename: api/routes/users.py
 from fastapi import APIRouter
 ```
@@ -95,7 +95,7 @@ from fastapi import APIRouter
 class User:
     pass
 ```
-        '''
+        """
         files = parse_code_blocks(content)
 
         assert len(files) == 2
@@ -104,7 +104,7 @@ class User:
 
     def test_multiline_code(self):
         """Test parsing code blocks with multiple lines."""
-        content = '''
+        content = """
 ```filename: app.py
 from fastapi import FastAPI
 
@@ -114,7 +114,7 @@ app = FastAPI()
 def read_root():
     return {"Hello": "World"}
 ```
-        '''
+        """
         files = parse_code_blocks(content)
 
         assert len(files) == 1
@@ -126,7 +126,7 @@ def read_root():
 
     def test_empty_code_block(self):
         """Test that empty code blocks are ignored."""
-        content = '''
+        content = """
 ```filename: empty.py
 
 ```
@@ -134,7 +134,7 @@ def read_root():
 ```filename: valid.py
 print("valid")
 ```
-        '''
+        """
         files = parse_code_blocks(content)
 
         # Empty blocks should be skipped
@@ -151,7 +151,7 @@ class TestWriteFiles:
         files = {
             "main.py": "print('hello')",
             "config.py": "DEBUG = True",
-            "requirements.txt": "fastapi\nuvicorn"
+            "requirements.txt": "fastapi\nuvicorn",
         }
 
         write_files(str(tmp_path), files)
@@ -173,7 +173,7 @@ class TestWriteFiles:
             "api/routes/users.py": "# users route",
             "api/routes/posts.py": "# posts route",
             "api/models/user.py": "# user model",
-            "config/settings.py": "# settings"
+            "config/settings.py": "# settings",
         }
 
         write_files(str(tmp_path), files)
@@ -196,15 +196,19 @@ class TestWriteFiles:
         files = {
             "unicode.py": "# こんにちは (Hello in Japanese)",
             "emoji.py": "# 🚀 Rocket",
-            "multiline.py": "line1\nline2\nline3"
+            "multiline.py": "line1\nline2\nline3",
         }
 
         write_files(str(tmp_path), files)
 
         # Verify UTF-8 encoding works
-        assert (tmp_path / "unicode.py").read_text(encoding="utf-8") == "# こんにちは (Hello in Japanese)"
+        assert (tmp_path / "unicode.py").read_text(
+            encoding="utf-8"
+        ) == "# こんにちは (Hello in Japanese)"
         assert (tmp_path / "emoji.py").read_text(encoding="utf-8") == "# 🚀 Rocket"
-        assert (tmp_path / "multiline.py").read_text(encoding="utf-8") == "line1\nline2\nline3"
+        assert (tmp_path / "multiline.py").read_text(
+            encoding="utf-8"
+        ) == "line1\nline2\nline3"
 
     def test_creates_output_directory(self, tmp_path):
         """Test that output directory is created if it doesn't exist."""
@@ -320,9 +324,9 @@ class TestCreatePythonPrompt:
 
         # Check for key elements from system prompt
         assert "FastAPI" in prompt
-        assert "filename:" in prompt
-        assert "requirements.txt" in prompt
-        assert "README.md" in prompt
+        assert "Return JSON only" in prompt
+        assert '"task_id"' in prompt
+        assert '"policy_rule_ids"' in prompt
         assert "Python" in prompt or "python" in prompt
 
     def test_prompt_structure(self):
@@ -342,7 +346,7 @@ class TestCreatePythonPrompt:
         test_cases = [
             ("Simple hello world API", "hello-api"),
             ("E-commerce backend with authentication", "ecommerce-backend"),
-            ("Real-time chat API with WebSocket support", "chat-api")
+            ("Real-time chat API with WebSocket support", "chat-api"),
         ]
 
         for user_prompt, project_name in test_cases:

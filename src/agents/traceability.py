@@ -25,7 +25,9 @@ def build_traceability_result(state: BuilderState) -> dict[str, Any]:
     plan = state.get("execution_plan") or {}
     quality = state.get("quality_results") or {}
     outputs = _selected_outputs(state)
-    offline = bool(outputs) and all(output.get("status") == "placeholder" for _, output in outputs)
+    offline = bool(outputs) and all(
+        output.get("status") == "placeholder" for _, output in outputs
+    )
     criteria_results: list[dict[str, Any]] = []
 
     for criterion in requirements.get("acceptance_criteria", []):
@@ -38,18 +40,25 @@ def build_traceability_result(state: BuilderState) -> dict[str, Any]:
             ]
             if criterion_id in contract.get("acceptance_criteria_ids", [])
         ]
-        task_ids = [
-            task["id"]
-            for task in plan.get("tasks", [])
-            if criterion_id in task.get("acceptance_criteria_ids", [])
-        ]
+        candidate_tasks = list(plan.get("tasks", []))
+        if any(stack == "python" for stack, _ in outputs):
+            candidate_tasks.extend(plan.get("python_tasks", []))
+        task_ids = list(
+            dict.fromkeys(
+                task["id"]
+                for task in candidate_tasks
+                if criterion_id in task.get("acceptance_criteria_ids", [])
+            )
+        )
         patch_evidence: dict[str, list[str]] = {}
         test_evidence: dict[str, list[str]] = {}
         for stack, output in outputs:
             paths: list[str] = []
             for run in output.get("task_runs", []):
                 if criterion_id in run.get("acceptance_criteria_ids", []):
-                    paths.extend(patch.get("path", "") for patch in run.get("patches", []))
+                    paths.extend(
+                        patch.get("path", "") for patch in run.get("patches", [])
+                    )
             patch_evidence[stack] = sorted(set(path for path in paths if path))
             test_evidence[stack] = sorted(
                 {
@@ -76,7 +85,13 @@ def build_traceability_result(state: BuilderState) -> dict[str, Any]:
             and stacks_have_tests
             and quality.get("passed")
         )
-        status = "not_evaluated" if offline else "satisfied" if satisfied else "missing_evidence"
+        status = (
+            "not_evaluated"
+            if offline
+            else "satisfied"
+            if satisfied
+            else "missing_evidence"
+        )
         criteria_results.append(
             {
                 "id": criterion_id,
@@ -100,15 +115,40 @@ def build_traceability_result(state: BuilderState) -> dict[str, Any]:
                 ],
             }
         )
+    python_quality = next(
+        (item for item in quality.get("stacks", []) if item.get("stack") == "python"),
+        {},
+    )
+    compliance = python_quality.get("policy_compliance") or {}
+    policy_enabled = bool((state.get("backend_policy") or {}).get("enabled"))
+    policy_passed = offline or not policy_enabled or bool(compliance.get("passed"))
     passed = offline or (
         bool(criteria_results)
         and all(item["status"] == "satisfied" for item in criteria_results)
+        and policy_passed
     )
     return {
         "status": "not_evaluated" if offline else "passed" if passed else "failed",
         "passed": passed,
         "criteria": criteria_results,
         "quality_status": quality.get("status", "missing"),
+        "policy": {
+            "enabled": policy_enabled,
+            "id": (state.get("backend_policy") or {}).get("id"),
+            "version": (state.get("backend_policy") or {}).get("version"),
+            "sha256": (state.get("backend_policy") or {}).get("sha256"),
+            "status": (
+                "not_applicable"
+                if not policy_enabled
+                else "not_evaluated"
+                if offline
+                else "passed"
+                if policy_passed
+                else "failed"
+            ),
+            "compliance_report": compliance.get("artifact_path"),
+            "violations": compliance.get("violations", []),
+        },
     }
 
 
@@ -143,10 +183,27 @@ def render_traceability_report(result: dict[str, Any]) -> str:
         for stack, paths in item.get("patches", {}).items():
             lines.append(f"- {stack.title()} patches: {', '.join(paths) or 'none'}")
         for stack, paths in item.get("tests", {}).items():
-            lines.append(f"- {stack.title()} acceptance tests: {', '.join(paths) or 'none'}")
+            lines.append(
+                f"- {stack.title()} acceptance tests: {', '.join(paths) or 'none'}"
+            )
         for stack, checks in item.get("quality_evidence", {}).items():
             lines.append(f"- {stack.title()} checks: {', '.join(checks) or 'none'}")
         lines.append("")
+    policy = result.get("policy", {})
+    lines.extend(
+        [
+            "## Python Production Policy",
+            "",
+            f"- Enabled: {str(policy.get('enabled', False)).lower()}",
+            f"- Policy: `{policy.get('id') or 'n/a'}`",
+            f"- Version: `{policy.get('version') or 'n/a'}`",
+            f"- SHA-256: `{policy.get('sha256') or 'n/a'}`",
+            f"- Status: **{policy.get('status', 'not_applicable')}**",
+            f"- Compliance report: {policy.get('compliance_report') or 'none'}",
+            f"- Violations: {len(policy.get('violations', []))}",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 

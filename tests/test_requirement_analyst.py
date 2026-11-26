@@ -38,7 +38,10 @@ class TestComplexityClassification:
 
     def test_classifies_medium(self):
         text = "Build a dashboard API with auth and database support"
-        assert classify_complexity(text, ["Build dashboard", "Add auth", "Add database"]) == "medium"
+        assert (
+            classify_complexity(text, ["Build dashboard", "Add auth", "Add database"])
+            == "medium"
+        )
 
     def test_classifies_complex(self):
         text = "Build a microservices platform with payments, queue workers, and websocket updates"
@@ -69,10 +72,22 @@ class TestRequirementArtifact:
         assert "## Open Questions" in markdown
 
     def test_build_requirement_artifact_captures_constraints(self):
-        artifact = build_requirement_artifact("Must use FastAPI for this service.", "service")
+        artifact = build_requirement_artifact(
+            "Must use FastAPI for this service.", "service"
+        )
 
         assert "Must use FastAPI" in artifact["constraints"][0]
         assert "Specific implementation stack was mentioned." in artifact["constraints"]
+
+    def test_dense_feature_text_extracts_only_stable_domain_entities(self):
+        artifact = build_requirement_artifact(
+            "Build a Todo backend application with AuthenticationUser registration and login. "
+            "Users can only access their own dataTodo ManagementCreate, update, delete, and view todos. "
+            "Show completed, pending, and overdue todos.",
+            "todo",
+        )
+
+        assert artifact["domain_entities"] == ["user", "todo"]
 
 
 class TestPersistence:
@@ -97,10 +112,14 @@ class TestPersistence:
 
         questions_path = Path(paths["open_questions_markdown"])
         assert questions_path.exists()
-        assert "Which database should be used?" in questions_path.read_text(encoding="utf-8")
+        assert "Which database should be used?" in questions_path.read_text(
+            encoding="utf-8"
+        )
 
     def test_persist_requirement_artifacts_removes_stale_questions_file(self, tmp_path):
-        artifact = build_requirement_artifact("Build an API with auth, a database, and deployment details.", "api")
+        artifact = build_requirement_artifact(
+            "Build an API with auth, a database, and deployment details.", "api"
+        )
         manifest = ensure_workspace_layout(tmp_path)
         stale_questions_path = Path(manifest["requirements_dir"]) / "open-questions.md"
 
@@ -111,18 +130,25 @@ class TestPersistence:
         assert second_paths["open_questions_markdown"] == ""
         assert not stale_questions_path.exists()
 
-    def test_persist_requirement_artifacts_ignores_clarification_answer_files(self, tmp_path):
+    def test_persist_requirement_artifacts_ignores_clarification_answer_files(
+        self, tmp_path
+    ):
         artifact = build_requirement_artifact("Build an API", "api")
         artifact["open_questions"] = []
         artifact["clarification_answers"] = [
-            {"question": "Which database or persistence layer should be used?", "answer": "PostgreSQL"},
+            {
+                "question": "Which database or persistence layer should be used?",
+                "answer": "PostgreSQL",
+            },
         ]
         manifest = ensure_workspace_layout(tmp_path)
         paths = persist_requirement_artifacts(artifact, manifest, "job-clarified")
 
         assert paths["clarification_answers_json"] == ""
         assert paths["clarification_answers_markdown"] == ""
-        assert "PostgreSQL" in Path(paths["requirements_json"]).read_text(encoding="utf-8")
+        assert "PostgreSQL" in Path(paths["requirements_json"]).read_text(
+            encoding="utf-8"
+        )
 
 
 class TestAnalyzeRequirements:
@@ -136,4 +162,6 @@ class TestAnalyzeRequirements:
         assert result["current_phase"] == "requirement_analysis"
         assert result["input_type"] in {"prompt", "brief", "prd", "feature_list"}
         assert result["requirements"]["needs_clarification"] is False
-        assert Path(result["requirements"]["artifact_paths"]["requirements_json"]).exists()
+        assert Path(
+            result["requirements"]["artifact_paths"]["requirements_json"]
+        ).exists()

@@ -203,10 +203,9 @@ def _route_after_quality_gate(state: BuilderState) -> str:
 
 def _route_after_traceability(state: BuilderState) -> str:
     """Compare only complete dual-stack deliveries."""
-    if (
-        state.get("target_stack", "both") == "both"
-        and (state.get("traceability_result") or {}).get("passed")
-    ):
+    if state.get("target_stack", "both") == "both" and (
+        state.get("traceability_result") or {}
+    ).get("passed"):
         return "comparison"
     return "generate_report"
 
@@ -339,6 +338,7 @@ def create_workflow() -> StateGraph:
     from src.agents.quality_gate import run_quality_gate
     from src.agents.targeted_repair import repair_failed_checks
     from src.agents.traceability import check_requirement_traceability
+    from src.policy import load_backend_policy
 
     # Create graph with BuilderState
     workflow = StateGraph(BuilderState)
@@ -347,7 +347,8 @@ def create_workflow() -> StateGraph:
     # when a conditional edge skips a node or fans out both builders.
     nodes = {
         "parse_input": (parse_input_node, "workflow"),
-        "requirement_analysis": (analyze_requirements, "parse_input"),
+        "backend_policy": (load_backend_policy, "parse_input"),
+        "requirement_analysis": (analyze_requirements, "backend_policy"),
         "clarification_gate": (clarify_requirements, "requirement_analysis"),
         "acceptance_approval": (approve_acceptance_criteria, "requirement_analysis"),
         "architecture_planning": (analyze_architecture, "acceptance_approval"),
@@ -373,7 +374,8 @@ def create_workflow() -> StateGraph:
 
     # Define edges for workflow flow
     # After parse_input, run requirement analysis first
-    workflow.add_edge("parse_input", "requirement_analysis")
+    workflow.add_edge("parse_input", "backend_policy")
+    workflow.add_edge("backend_policy", "requirement_analysis")
 
     # Clarification is handled inline when requirement analyzer finds gaps
     workflow.add_conditional_edges(

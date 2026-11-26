@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, TypedDict
 from uuid import uuid4
 
 WORKSPACE_DIRS = (
+    "policy",
     "requirements",
     "architecture",
     "specs",
@@ -31,6 +32,7 @@ WORKSPACE_DIRS = (
 
 JOB_PHASES = (
     "intake",
+    "policy_loading",
     "requirement_analysis",
     "acceptance_approval",
     "architecture_planning",
@@ -65,6 +67,7 @@ class RequirementArtifact(TypedDict, total=False):
     goals: list[str]
     functional_requirements: list[str]
     non_functional_requirements: list[str]
+    domain_entities: list[str]
     acceptance_criteria: list[Dict[str, Any]]
     acceptance_approval: Dict[str, Any]
     constraints: list[str]
@@ -91,6 +94,7 @@ class ArchitectureArtifact(TypedDict, total=False):
     api_contracts: list[Dict[str, Any]]
     data_contracts: list[Dict[str, Any]]
     error_contract: Dict[str, Any]
+    python_production: Dict[str, Any]
     security_strategy: list[str]
     configuration_strategy: list[str]
     observability_strategy: list[str]
@@ -149,6 +153,7 @@ class ArtifactManifest(TypedDict, total=False):
 
     workspace_root: str
     project_name: str
+    policy_dir: str
     requirements_dir: str
     architecture_dir: str
     specs_dir: str
@@ -170,7 +175,9 @@ class ArtifactManifest(TypedDict, total=False):
     artifact_manifest_path: str
     steps_dir: str
     comparison_report_markdown: str
+    policy_snapshot_markdown: str
     quality_report_markdown: str
+    policy_compliance_report_markdown: str
     latest_repair_report_markdown: str
     traceability_report_markdown: str
     delivery_summary_markdown: str
@@ -266,6 +273,7 @@ def create_artifact_manifest(
     manifest = ArtifactManifest(
         workspace_root=str(root),
         project_name=str(project_name or ""),
+        policy_dir=str(root / "policy"),
         requirements_dir=str(root / "requirements"),
         architecture_dir=str(root / "architecture"),
         specs_dir=str(root / "specs"),
@@ -310,6 +318,7 @@ def ensure_workspace_layout(
         base_dir, project_name=project_name, run_id=run_id
     )
     for key in (
+        "policy_dir",
         "requirements_dir",
         "architecture_dir",
         "specs_dir",

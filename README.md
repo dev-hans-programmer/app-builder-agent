@@ -11,6 +11,8 @@ AI-powered agent that generates backend applications in both Python (FastAPI) an
 - 🔎 **Run-scoped observability** with step attempts and artifact hashes
 - 🧭 **Gated generation pipeline** with approved criteria, API/data contracts, task patches,
   quality checks, targeted repair, and requirement traceability
+- 🏗️ **Policy-driven Python generation** from the versioned `backend-prompt.md`, with clean
+  architecture tasks and a mandatory compliance report
 - 🤖 **Powered by OpenAI**
 - 🎯 **LangGraph orchestration**
 
@@ -70,6 +72,10 @@ comparison report.
 See [Generation Pipeline](docs/generation-pipeline.md) for the artifacts, quality gates,
 repair behavior, and completion rules used by every run.
 
+Python runs always load `backend-prompt.md` before requirement analysis. To keep the policy in a
+different location, set `BACKEND_POLICY_PATH`; the selected file is hashed and copied into the
+project's `policy/` directory for reproducibility. Node.js-only runs do not load or apply it.
+
 ### Example
 
 ```bash
@@ -99,6 +105,7 @@ app-builder-agent/
 │   ├── agents/          # Builder and comparison agents
 │   ├── graph/           # LangGraph workflow
 │   ├── observability/   # Run events, step artifacts, usage, and summaries
+│   ├── policy/          # Python backend policy loading and task section selection
 │   ├── prompts/         # Prompt templates
 │   └── utils/           # Utilities
 ├── builds/              # Generated applications
@@ -126,8 +133,8 @@ ruff check src/ tests/
 ## Project Status
 
 Implemented: stack-selective generation, approved acceptance artifacts, architecture/API/data
-contracts, executable task generation, task-level patches, quality gates, bounded repair,
-traceability, checkpoints, and run observability.
+contracts, Python production-policy enforcement, executable task generation, task-level patches,
+quality gates, bounded repair, traceability, checkpoints, and run observability.
 
 Planned next: queue-backed workers for durable long-running execution and external progress
 tracking.

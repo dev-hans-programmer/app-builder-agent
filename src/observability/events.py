@@ -578,7 +578,9 @@ def record_step_artifact(filename: str, content: Any) -> str | None:
         safe_name,
     )
     if suffix is None and dynamic:
-        artifact_kind = "prompt.txt" if safe_name.endswith("prompt.txt") else "response.json"
+        artifact_kind = (
+            "prompt.txt" if safe_name.endswith("prompt.txt") else "response.json"
+        )
         suffix = safe_name.replace(".txt", ".md").replace(".json", ".md")
     if suffix is None:
         raise ValueError(f"Unsupported step artifact: {filename}")
@@ -691,6 +693,13 @@ def _model_metadata(result: Mapping[str, Any], step_id: str) -> dict[str, Any]:
     candidates: list[Any] = []
     if step_id == "comparison":
         candidates.append(result.get("comparison_metadata"))
+    elif step_id == "requirement_analysis":
+        requirements = result.get("requirements")
+        candidates.append(
+            requirements.get("observability")
+            if isinstance(requirements, Mapping)
+            else None
+        )
     elif step_id == "python_builder":
         output = result.get("python_output")
         candidates.append(
@@ -708,7 +717,9 @@ def _model_metadata(result: Mapping[str, Any], step_id: str) -> dict[str, Any]:
             for record in latest.get("records", []):
                 if isinstance(record, Mapping):
                     candidates.append(record.get("observability"))
-    valid = [dict(candidate) for candidate in candidates if isinstance(candidate, Mapping)]
+    valid = [
+        dict(candidate) for candidate in candidates if isinstance(candidate, Mapping)
+    ]
     if not valid:
         return {}
     if len(valid) == 1:
@@ -727,7 +738,9 @@ def _model_metadata(result: Mapping[str, Any], step_id: str) -> dict[str, Any]:
         "total_tokens",
         "estimated_cost",
     ):
-        values = [item.get(key) for item in valid if isinstance(item.get(key), (int, float))]
+        values = [
+            item.get(key) for item in valid if isinstance(item.get(key), (int, float))
+        ]
         aggregate[key] = sum(values) if values else None
     return aggregate
 
@@ -796,7 +809,10 @@ def _business_outcome(
     if step_id == "targeted_repair":
         history = result.get("repair_history")
         latest = history[-1] if isinstance(history, list) and history else None
-        if isinstance(latest, Mapping) and latest.get("status") in {"failed", "partial"}:
+        if isinstance(latest, Mapping) and latest.get("status") in {
+            "failed",
+            "partial",
+        }:
             return (
                 "failed",
                 "TargetedRepairFailed",

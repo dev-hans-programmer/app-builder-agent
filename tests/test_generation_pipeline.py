@@ -27,17 +27,24 @@ def test_planning_artifacts_link_approved_criteria_to_contracts_and_tasks(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    state = create_initial_state("Build a todo API with CRUD operations", "todo", target_stack="python")
+    state = create_initial_state(
+        "Build a todo API with CRUD operations", "todo", target_stack="python"
+    )
     state = _apply(state, analyze_requirements(state))
     state = _apply(state, approve_acceptance_criteria(state))
     state = _apply(state, analyze_architecture(state))
     state = _apply(state, generate_specs(state))
     state = _apply(state, plan_execution(state))
 
-    criterion_ids = {item["id"] for item in state["requirements"]["acceptance_criteria"]}
+    criterion_ids = {
+        item["id"] for item in state["requirements"]["acceptance_criteria"]
+    }
     assert criterion_ids
     assert state["requirements"]["acceptance_approval"]["status"] == "approved"
-    assert all(item["status"] == "approved" for item in state["requirements"]["acceptance_criteria"])
+    assert all(
+        item["status"] == "approved"
+        for item in state["requirements"]["acceptance_criteria"]
+    )
     assert all(
         criterion_ids.issubset(set(contract["acceptance_criteria_ids"]))
         for contract in state["architecture_plan"]["api_contracts"]
@@ -47,34 +54,64 @@ def test_planning_artifacts_link_approved_criteria_to_contracts_and_tasks(
         criterion_ids.issubset(set(task["acceptance_criteria_ids"]))
         for task in state["execution_plan"]["tasks"]
     )
-    assert Path(state["requirements"]["artifact_paths"]["acceptance_criteria_markdown"]).is_file()
-    assert Path(state["architecture_plan"]["artifact_paths"]["api_contracts_markdown"]).is_file()
-    assert Path(state["architecture_plan"]["artifact_paths"]["data_contracts_markdown"]).is_file()
+    assert Path(
+        state["requirements"]["artifact_paths"]["acceptance_criteria_markdown"]
+    ).is_file()
+    assert Path(
+        state["architecture_plan"]["artifact_paths"]["api_contracts_markdown"]
+    ).is_file()
+    assert Path(
+        state["architecture_plan"]["artifact_paths"]["data_contracts_markdown"]
+    ).is_file()
 
 
-def test_python_builder_generates_one_patch_set_per_executable_task(tmp_path, monkeypatch):
+def test_python_builder_generates_one_patch_set_per_executable_task(
+    tmp_path, monkeypatch
+):
     responses = [
         SimpleNamespace(
             id="one",
-            choices=[SimpleNamespace(message=SimpleNamespace(content="```filename: main.py\napp = object()\n```"))],
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="```filename: main.py\napp = object()\n```"
+                    )
+                )
+            ],
             usage=None,
         ),
         SimpleNamespace(
             id="two",
-            choices=[SimpleNamespace(message=SimpleNamespace(content="```filename: test_main.py\ndef test_app():\n    assert True\n```"))],
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="```filename: test_main.py\ndef test_app():\n    assert True\n```"
+                    )
+                )
+            ],
             usage=None,
         ),
     ]
     create = MagicMock(side_effect=responses)
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(python_builder, "OpenAI", lambda **kwargs: client)
     state = create_initial_state("Build API", "task-patches", target_stack="python")
     state["artifacts"] = ensure_workspace_layout(tmp_path)
     state["execution_plan"] = {
         "tasks": [
-            {"id": "TASK-001", "acceptance_criteria_ids": ["AC-001"], "contract_ids": ["API-001"]},
-            {"id": "TASK-002", "acceptance_criteria_ids": ["AC-001"], "contract_ids": ["API-001"]},
+            {
+                "id": "TASK-001",
+                "acceptance_criteria_ids": ["AC-001"],
+                "contract_ids": ["API-001"],
+            },
+            {
+                "id": "TASK-002",
+                "acceptance_criteria_ids": ["AC-001"],
+                "contract_ids": ["API-001"],
+            },
         ]
     }
 
@@ -118,12 +155,52 @@ def test_python_quality_gate_runs_required_checks(tmp_path, monkeypatch):
     updates = quality_gate.run_quality_gate(state)
     events = [
         json.loads(line)
-        for line in Path(state["artifacts"]["events_path"]).read_text(encoding="utf-8").splitlines()
+        for line in Path(state["artifacts"]["events_path"])
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
-    command_events = [event for event in events if event["event_type"] == "quality_check_finished"]
+    command_events = [
+        event for event in events if event["event_type"] == "quality_check_finished"
+    ]
     assert updates["quality_results"]["passed"] is True
-    assert {event["verification_check"] for event in command_events} >= {"build", "test", "smoke"}
+    assert {event["verification_check"] for event in command_events} >= {
+        "build",
+        "test",
+        "smoke",
+    }
     assert all("command" in event and "exit_code" in event for event in command_events)
+
+
+def test_production_quality_commands_are_pinned_to_generated_project(
+    tmp_path, monkeypatch
+):
+    generated_root = tmp_path / "projects" / "demo" / "builds" / "python"
+    generated_root.mkdir(parents=True)
+    monkeypatch.setattr(
+        quality_gate.shutil,
+        "which",
+        lambda name: f"/tools/{name}" if name in {"uv", "docker"} else None,
+    )
+
+    definitions = quality_gate._python_commands(generated_root, production_policy=True)
+    commands = {
+        category: command for category, command, _required, _reason in definitions
+    }
+
+    assert commands["dependencies"] == [
+        "/tools/uv",
+        "lock",
+        "--project",
+        str(generated_root.resolve()),
+    ]
+    for category in ("build", "format", "lint", "type", "test", "migration", "smoke"):
+        assert commands[category][:4] == [
+            "/tools/uv",
+            "run",
+            "--project",
+            str(generated_root.resolve()),
+        ]
+    assert commands["container"] is None
 
 
 def test_traceability_requires_contract_task_patch_and_quality_evidence():
@@ -140,9 +217,7 @@ def test_traceability_requires_contract_task_patch_and_quality_evidence():
                 "data_contracts": [],
             },
             "execution_plan": {
-                "tasks": [
-                    {"id": "TASK-001", "acceptance_criteria_ids": ["AC-001"]}
-                ]
+                "tasks": [{"id": "TASK-001", "acceptance_criteria_ids": ["AC-001"]}]
             },
             "python_output": {
                 "status": "success",
@@ -182,12 +257,25 @@ def test_traceability_requires_contract_task_patch_and_quality_evidence():
 def test_workflow_repairs_failed_quality_gate_and_rechecks(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("REQUIREMENTS_MODEL_ENABLED", "false")
     monkeypatch.setattr(quality_gate.shutil, "which", lambda _name: None)
+
+    def without_production_policy(state):
+        return {
+            "backend_policy": {"enabled": False, "stack": "python"},
+            "artifacts": state["artifacts"],
+            "current_phase": "policy_loading",
+            "job_status": "running",
+        }
+
+    monkeypatch.setattr("src.policy.load_backend_policy", without_production_policy)
     generated = SimpleNamespace(
         id="generated",
         choices=[
             SimpleNamespace(
-                message=SimpleNamespace(content="```filename: main.py\napp = object()\n```")
+                message=SimpleNamespace(
+                    content="```filename: main.py\napp = object()\n```"
+                )
             )
         ],
         usage=None,
@@ -218,7 +306,9 @@ def test_workflow_repairs_failed_quality_gate_and_rechecks(tmp_path, monkeypatch
 
     final = create_workflow().invoke(
         create_initial_state(
-            "Build a todo API with CRUD operations", "repair-loop", target_stack="python"
+            "Build a todo API with CRUD operations",
+            "repair-loop",
+            target_stack="python",
         )
     )
 

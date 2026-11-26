@@ -100,16 +100,17 @@ Automatically generated open questions are currently disabled regardless of this
 The agent processes your request in stages:
 
 1. Requirement analysis
-2. Acceptance criteria approval
-3. Architecture and API/data contracts
-4. Spec decomposition
-5. Executable task planning
-6. Task-level code generation for the selected stack or stacks
-7. Build, lint, type, test, and smoke checks
-8. Targeted repair and re-check, up to two attempts
-9. Requirement traceability gate
-10. Comparison when `--stack both` is selected
-11. Final reporting
+2. Python production-policy snapshot when Python is selected
+3. Acceptance criteria approval
+4. Architecture and API/data contracts
+5. Spec decomposition
+6. Executable task planning
+7. Task-level code generation for the selected stack or stacks
+8. Build, lint, type, test, smoke, and Python policy-compliance checks
+9. Targeted repair and re-check, up to two attempts
+10. Requirement traceability gate
+11. Comparison when `--stack both` is selected
+12. Final reporting
 
 See [Generation Pipeline](generation-pipeline.md) for completion rules and the evidence
 produced by each gate.
@@ -120,6 +121,7 @@ After a successful run, you will get:
 
 - generated backend code for the selected stack or stacks
 - requirement artifacts
+- the exact Python policy snapshot and hash when Python is selected
 - architecture artifacts
 - spec artifacts
 - execution plans
@@ -151,6 +153,7 @@ Each of these contains the actual source files generated for that stack.
 The agent also writes supporting files inside the same project folder:
 
 - `projects/<project-name>/requirements/`
+- `projects/<project-name>/policy/` (Python runs only)
 - `projects/<project-name>/architecture/`
 - `projects/<project-name>/specs/`
 - `projects/<project-name>/plans/`

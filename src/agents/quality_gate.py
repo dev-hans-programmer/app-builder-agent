@@ -16,6 +16,11 @@ from typing import Any
 from src.graph.runtime import ensure_workspace_layout, persist_job_checkpoint
 from src.graph.state import BuilderState
 from src.observability import append_event
+from src.agents.policy_compliance import (
+    evaluate_policy_compliance,
+    policy_report_hash,
+    render_policy_compliance,
+)
 
 
 CHECK_TIMEOUT_SECONDS = 180
@@ -98,22 +103,131 @@ def _run_check(
         }
 
 
-def _python_commands(root: Path) -> list[tuple[str, list[str] | None, bool, str]]:
+def _python_commands(
+    root: Path, *, production_policy: bool = False
+) -> list[tuple[str, list[str] | None, bool, str]]:
+    if production_policy:
+        uv = shutil.which("uv")
+        docker = shutil.which("docker")
+        project_root = str(root.resolve())
+        uv_run = [uv, "run", "--project", project_root] if uv else []
+        compose_file = next(
+            (
+                root / name
+                for name in (
+                    "docker-compose.yml",
+                    "docker-compose.yaml",
+                    "compose.yml",
+                    "compose.yaml",
+                )
+                if (root / name).is_file()
+            ),
+            None,
+        )
+        return [
+            (
+                "dependencies",
+                [uv, "lock", "--project", project_root] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
+                "build",
+                [*uv_run, "python", "-m", "compileall", "-q", "app"] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
+                "format",
+                [*uv_run, "ruff", "format", "--check", "."] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
+                "lint",
+                [*uv_run, "ruff", "check", "."] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
+                "type",
+                [*uv_run, "mypy", "app"] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
+                "test",
+                [*uv_run, "pytest", "-q"] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
+                "migration",
+                [*uv_run, "alembic", "heads"] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
+                "smoke",
+                [
+                    *uv_run,
+                    "python",
+                    "-c",
+                    "from app.main import app; assert app is not None",
+                ]
+                if uv
+                else None,
+                True,
+                "uv is not installed",
+            ),
+            (
+                "container",
+                [
+                    docker,
+                    "compose",
+                    "-f",
+                    str(compose_file.resolve()),
+                    "config",
+                    "--quiet",
+                ]
+                if docker and compose_file
+                else None,
+                False,
+                (
+                    "docker is not installed; static container policy checks still ran"
+                    if not docker
+                    else "No Compose file exists in the generated project; static policy checks still ran"
+                ),
+            ),
+        ]
     requirements = root / "requirements.txt"
     uv = shutil.which("uv")
     runtime = [sys.executable]
     test_runtime = runtime
     if uv and requirements.is_file():
-        uv_runtime = [uv, "run", "--isolated", "--with-requirements", "requirements.txt"]
+        uv_runtime = [
+            uv,
+            "run",
+            "--isolated",
+            "--with-requirements",
+            "requirements.txt",
+        ]
         runtime = [*uv_runtime, "python"]
         test_runtime = [*uv_runtime, "--with", "pytest", "python"]
-    entry = next((name for name in ("main.py", "app.py") if (root / name).is_file()), None)
+    entry = next(
+        (name for name in ("main.py", "app.py") if (root / name).is_file()), None
+    )
     tests_exist = any(root.glob("test*.py")) or (root / "tests").is_dir()
     ruff = shutil.which("ruff")
     mypy = shutil.which("mypy")
     return [
         ("build", [*runtime, "-m", "compileall", "-q", "."], True, ""),
-        ("lint", [ruff, "check", "."] if ruff else None, False, "ruff is not installed"),
+        (
+            "lint",
+            [ruff, "check", "."] if ruff else None,
+            False,
+            "ruff is not installed",
+        ),
         ("type", [mypy, "."] if mypy else None, False, "mypy is not installed"),
         (
             "test",
@@ -123,7 +237,11 @@ def _python_commands(root: Path) -> list[tuple[str, list[str] | None, bool, str]
         ),
         (
             "smoke",
-            [*runtime, "-c", f"import {Path(entry).stem}; assert hasattr({Path(entry).stem}, 'app')"]
+            [
+                *runtime,
+                "-c",
+                f"import {Path(entry).stem}; assert hasattr({Path(entry).stem}, 'app')",
+            ]
             if entry
             else None,
             True,
@@ -136,34 +254,69 @@ def _node_commands(root: Path) -> list[tuple[str, list[str] | None, bool, str]]:
     package_path = root / "package.json"
     if not package_path.is_file():
         return [
-            (category, None, category in {"build", "test", "smoke"}, "package.json was not generated")
+            (
+                category,
+                None,
+                category in {"build", "test", "smoke"},
+                "package.json was not generated",
+            )
             for category in ("build", "lint", "type", "test", "smoke")
         ]
     try:
         package = json.loads(package_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         package = {}
-    scripts = package.get("scripts", {}) if isinstance(package.get("scripts"), dict) else {}
+    scripts = (
+        package.get("scripts", {}) if isinstance(package.get("scripts"), dict) else {}
+    )
     entry = package.get("main") or next(
-        (name for name in ("server.js", "app.js", "index.js") if (root / name).is_file()),
+        (
+            name
+            for name in ("server.js", "app.js", "index.js")
+            if (root / name).is_file()
+        ),
         None,
     )
     node = shutil.which("node")
     npm = shutil.which("npm")
-    build_command = [npm, "run", "build"] if npm and "build" in scripts else (
-        [node, "--check", str(entry)] if node and entry else None
+    build_command = (
+        [npm, "run", "build"]
+        if npm and "build" in scripts
+        else ([node, "--check", str(entry)] if node and entry else None)
     )
     return [
         (
             "dependencies",
-            [npm, "install", "--ignore-scripts", "--no-audit", "--no-fund"] if npm else None,
+            [npm, "install", "--ignore-scripts", "--no-audit", "--no-fund"]
+            if npm
+            else None,
             True,
             "npm is not installed.",
         ),
-        ("build", build_command, True, "No build script or JavaScript entry point was generated."),
-        ("lint", [npm, "run", "lint"] if npm and "lint" in scripts else None, False, "No lint script is configured."),
-        ("type", [npm, "run", "typecheck"] if npm and "typecheck" in scripts else None, False, "No typecheck script is configured."),
-        ("test", [npm, "test"] if npm and "test" in scripts else None, True, "No test script is configured."),
+        (
+            "build",
+            build_command,
+            True,
+            "No build script or JavaScript entry point was generated.",
+        ),
+        (
+            "lint",
+            [npm, "run", "lint"] if npm and "lint" in scripts else None,
+            False,
+            "No lint script is configured.",
+        ),
+        (
+            "type",
+            [npm, "run", "typecheck"] if npm and "typecheck" in scripts else None,
+            False,
+            "No typecheck script is configured.",
+        ),
+        (
+            "test",
+            [npm, "test"] if npm and "test" in scripts else None,
+            True,
+            "No test script is configured.",
+        ),
         (
             "smoke",
             [node, "--check", str(entry)] if node and entry else None,
@@ -173,7 +326,13 @@ def _node_commands(root: Path) -> list[tuple[str, list[str] | None, bool, str]]:
     ]
 
 
-def evaluate_stack(stack: str, output: dict[str, Any]) -> dict[str, Any]:
+def evaluate_stack(
+    stack: str,
+    output: dict[str, Any],
+    *,
+    backend_policy: dict[str, Any] | None = None,
+    architecture: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Evaluate one selected stack and return structured command evidence."""
     if output.get("status") == "placeholder":
         checks = [
@@ -187,7 +346,12 @@ def evaluate_stack(stack: str, output: dict[str, Any]) -> dict[str, Any]:
             )
             for category in ("build", "lint", "type", "test", "smoke")
         ]
-        return {"stack": stack, "status": "not_evaluated", "passed": True, "checks": checks}
+        return {
+            "stack": stack,
+            "status": "not_evaluated",
+            "passed": True,
+            "checks": checks,
+        }
     if output.get("status") != "success" or not output.get("output_dir"):
         return {
             "stack": stack,
@@ -197,23 +361,60 @@ def evaluate_stack(stack: str, output: dict[str, Any]) -> dict[str, Any]:
             "error": output.get("error", "Generation did not complete successfully."),
         }
     root = Path(output["output_dir"])
-    definitions = _python_commands(root) if stack == "python" else _node_commands(root)
-    checks = [
-        _run_check(
-            stack,
-            category,
-            command,
-            root,
-            required=required,
-            skipped_reason=reason,
+    policy = backend_policy or {}
+    compliance: dict[str, Any] | None = None
+    checks: list[dict[str, Any]] = []
+    if stack == "python" and policy.get("enabled"):
+        compliance = evaluate_policy_compliance(root, policy, architecture or {})
+        checks.append(
+            {
+                "stack": stack,
+                "category": "architecture",
+                "command": ["internal-policy-validator"],
+                "command_display": "internal Python production-policy validator",
+                "status": "passed" if compliance["passed"] else "failed",
+                "required": True,
+                "exit_code": 0 if compliance["passed"] else 1,
+                "duration_ms": 0,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "ended_at": datetime.now(timezone.utc).isoformat(),
+                "stdout": "",
+                "stderr": "\n".join(
+                    f"{item['rule_id']} {item['path']}: {item['message']} Remediation: {item['remediation']}"
+                    for item in compliance.get("violations", [])
+                ),
+            }
         )
-        for category, command, required, reason in definitions
-    ]
+    definitions = (
+        _python_commands(root, production_policy=bool(policy.get("enabled")))
+        if stack == "python"
+        else _node_commands(root)
+    )
+    checks.extend(
+        [
+            _run_check(
+                stack,
+                category,
+                command,
+                root,
+                required=required,
+                skipped_reason=reason,
+            )
+            for category, command, required, reason in definitions
+        ]
+    )
     passed = all(
-        check["status"] == "passed" or (check["status"] == "skipped" and not check["required"])
+        check["status"] == "passed"
+        or (check["status"] == "skipped" and not check["required"])
         for check in checks
     )
-    return {"stack": stack, "status": "passed" if passed else "failed", "passed": passed, "checks": checks}
+    return {
+        "stack": stack,
+        "status": "passed" if passed else "failed",
+        "passed": passed,
+        "checks": checks,
+        "policy_compliance": compliance,
+    }
 
 
 def render_quality_report(result: dict[str, Any]) -> str:
@@ -249,7 +450,9 @@ def render_quality_report(result: dict[str, Any]) -> str:
                         f"### {check['category'].title()} diagnostics",
                         "",
                         "```text",
-                        (check.get("stdout", "") + "\n" + check.get("stderr", "")).strip(),
+                        (
+                            check.get("stdout", "") + "\n" + check.get("stderr", "")
+                        ).strip(),
                         "```",
                     ]
                 )
@@ -267,7 +470,15 @@ def run_quality_gate(state: BuilderState) -> dict[str, Any]:
         selected.append(("python", state.get("python_output") or {}))
     if target in {"nodejs", "both"}:
         selected.append(("nodejs", state.get("nodejs_output") or {}))
-    stacks = [evaluate_stack(stack, output) for stack, output in selected]
+    stacks = [
+        evaluate_stack(
+            stack,
+            output,
+            backend_policy=state.get("backend_policy") or {},
+            architecture=state.get("architecture_plan") or {},
+        )
+        for stack, output in selected
+    ]
     passed = bool(stacks) and all(item["passed"] for item in stacks)
     result = {
         "status": "passed" if passed else "failed",
@@ -282,6 +493,17 @@ def run_quality_gate(state: BuilderState) -> dict[str, Any]:
     result["artifact_path"] = str(report_path)
     manifest["quality_report_markdown"] = str(report_path)
     report_hash = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    for stack_result in stacks:
+        compliance = stack_result.get("policy_compliance")
+        if not compliance:
+            continue
+        compliance_path = verification_dir / "python-policy-compliance.md"
+        compliance_path.write_text(
+            render_policy_compliance(compliance), encoding="utf-8"
+        )
+        compliance["artifact_path"] = str(compliance_path)
+        compliance["artifact_hash"] = policy_report_hash(compliance_path)
+        manifest["policy_compliance_report_markdown"] = str(compliance_path)
     for stack_result in stacks:
         for check in stack_result.get("checks", []):
             append_event(
@@ -306,7 +528,9 @@ def run_quality_gate(state: BuilderState) -> dict[str, Any]:
                         else None
                     ),
                     "verification_check": check["category"],
-                    "expected": "exit code 0" if check.get("command") else "tool available",
+                    "expected": "exit code 0"
+                    if check.get("command")
+                    else "tool available",
                     "actual": (
                         f"exit code {check['exit_code']}"
                         if check.get("exit_code") is not None
@@ -315,7 +539,9 @@ def run_quality_gate(state: BuilderState) -> dict[str, Any]:
                     "severity": "error" if check["status"] == "failed" else "info",
                     "output_artifacts": [str(report_path)],
                     "artifact_hashes": {str(report_path): report_hash},
-                    "error_type": "CommandFailed" if check["status"] == "failed" else None,
+                    "error_type": "CommandFailed"
+                    if check["status"] == "failed"
+                    else None,
                     "error_message": (
                         (check.get("stderr") or check.get("stdout") or "")[-2_000:]
                         if check["status"] == "failed"
@@ -331,14 +557,16 @@ def run_quality_gate(state: BuilderState) -> dict[str, Any]:
                 {
                     "task_id": task.get("id"),
                     "spec_id": task.get("spec_id"),
-                    "status": "generated" if any(
-                        output.get("status") == "success" for _, output in selected
-                    ) else "skipped",
+                    "status": "generated"
+                    if any(output.get("status") == "success" for _, output in selected)
+                    else "skipped",
                 }
             )
     repair_history = list(state.get("repair_history") or [])
     if passed and not repair_history:
-        repair_history.append({"status": "skipped", "reason": "All quality gates passed."})
+        repair_history.append(
+            {"status": "skipped", "reason": "All quality gates passed."}
+        )
     updates = {
         "quality_results": result,
         "verification_results": history,

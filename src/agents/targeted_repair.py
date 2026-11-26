@@ -19,12 +19,14 @@ from src.agents.python_builder import (
     apply_file_patches,
     extract_response_text,
     parse_code_blocks,
+    parse_generation_response,
     read_project_files,
 )
 from src.graph.runtime import ensure_workspace_layout, persist_job_checkpoint
 from src.graph.state import BuilderState
 from src.observability import record_step_artifact
 from src.observability.model_usage import model_observability
+from src.policy import policy_text_for_task
 
 
 REPAIR_PROMPT_VERSION = "1.0"
@@ -37,24 +39,44 @@ def _repair_prompt(
     current_files: dict[str, str],
 ) -> str:
     framework = "Python/FastAPI" if stack == "python" else "Node.js/Express"
+    policy = state.get("backend_policy") or {}
+    policy_text = (
+        policy_text_for_task(policy, "repair")
+        if stack == "python" and policy.get("enabled")
+        else "No stack-specific production policy applies."
+    )
+    output_contract = (
+        """Return JSON only, without Markdown, using this exact envelope:
+{
+  "task_id": "repair",
+  "acceptance_criteria_ids": [],
+  "policy_rule_ids": [],
+  "files": [{"path": "relative/path", "content": "complete file contents"}]
+}"""
+        if stack == "python" and policy.get("enabled")
+        else """Return complete contents for every changed or new file using exactly:
+```filename: path/to/file
+[complete file contents]
+```"""
+    )
     return f"""You are repairing a generated {framework} application.
 
 Change only what is necessary to fix the reported failures. Approved acceptance criteria and
-architecture contracts are binding. Preserve unrelated behavior. Return complete contents for
-every changed or new file using exactly:
-```filename: path/to/file
-[complete file contents]
-```
+architecture contracts are binding. Preserve unrelated behavior.
+{output_contract}
 Do not return diffs, explanations, deleted-file instructions, or placeholder code.
 
-Project: {state['project_name']}
-Original request: {state['user_prompt']}
+Project: {state["project_name"]}
+Original request: {state["user_prompt"]}
+
+Binding production policy:
+{policy_text}
 
 Approved requirements:
-{json.dumps(state.get('requirements') or {}, indent=2, sort_keys=True)}
+{json.dumps(state.get("requirements") or {}, indent=2, sort_keys=True)}
 
 Architecture contracts:
-{json.dumps(state.get('architecture_plan') or {}, indent=2, sort_keys=True)}
+{json.dumps(state.get("architecture_plan") or {}, indent=2, sort_keys=True)}
 
 Failed checks:
 {json.dumps(failures, indent=2, sort_keys=True)}
@@ -67,10 +89,19 @@ Current files:
 def _failed_stack_checks(state: BuilderState) -> list[tuple[str, list[dict[str, Any]]]]:
     failed: list[tuple[str, list[dict[str, Any]]]] = []
     for result in (state.get("quality_results") or {}).get("stacks", []):
-        checks = [check for check in result.get("checks", []) if check.get("status") == "failed"]
+        checks = [
+            check
+            for check in result.get("checks", [])
+            if check.get("status") == "failed"
+        ]
         if not result.get("passed"):
             if not checks:
-                checks = [{"category": "generation", "stderr": result.get("error", "Generation failed.")}]
+                checks = [
+                    {
+                        "category": "generation",
+                        "stderr": result.get("error", "Generation failed."),
+                    }
+                ]
             failed.append((result["stack"], checks))
     return failed
 
@@ -120,7 +151,9 @@ def repair_failed_checks(state: BuilderState) -> dict[str, Any]:
                 {
                     "stack": stack,
                     "status": "skipped",
-                    "failed_checks": [check.get("category", "unknown") for check in checks],
+                    "failed_checks": [
+                        check.get("category", "unknown") for check in checks
+                    ],
                     "patches": [],
                     "error": "OPENAI_API_KEY is not available.",
                 }
@@ -152,7 +185,12 @@ def repair_failed_checks(state: BuilderState) -> dict[str, Any]:
                 },
             )
             require_visible_completion(content, response, options)
-            files = parse_code_blocks(content)
+            files = (
+                parse_generation_response(content)[0]
+                if stack == "python"
+                and (state.get("backend_policy") or {}).get("enabled")
+                else parse_code_blocks(content)
+            )
             if not files:
                 raise ValueError("Repair response did not contain any files.")
             patches = apply_file_patches(output_dir, files)
@@ -162,9 +200,16 @@ def repair_failed_checks(state: BuilderState) -> dict[str, Any]:
                     "status": "success",
                     "output_dir": str(output_dir),
                     "patches": [*previous_patches, *patches],
-                    "files_created": sorted(set([*output.get("files_created", []), *files])),
+                    "files_created": sorted(
+                        set([*output.get("files_created", []), *files])
+                    ),
                     "artifact_paths": sorted(
-                        set([*output.get("artifact_paths", []), *[str(output_dir / path) for path in files]])
+                        set(
+                            [
+                                *output.get("artifact_paths", []),
+                                *[str(output_dir / path) for path in files],
+                            ]
+                        )
                     ),
                 }
             )
@@ -174,7 +219,9 @@ def repair_failed_checks(state: BuilderState) -> dict[str, Any]:
                 {
                     "stack": stack,
                     "status": "patched",
-                    "failed_checks": [check.get("category", "unknown") for check in checks],
+                    "failed_checks": [
+                        check.get("category", "unknown") for check in checks
+                    ],
                     "patches": patches,
                     "duration_ms": round((time.perf_counter() - started) * 1000, 2),
                     "observability": usage,
@@ -185,7 +232,9 @@ def repair_failed_checks(state: BuilderState) -> dict[str, Any]:
                 {
                     "stack": stack,
                     "status": "failed",
-                    "failed_checks": [check.get("category", "unknown") for check in checks],
+                    "failed_checks": [
+                        check.get("category", "unknown") for check in checks
+                    ],
                     "patches": [],
                     "error": str(exc),
                 }
@@ -220,6 +269,8 @@ def repair_failed_checks(state: BuilderState) -> dict[str, Any]:
         }
     )
     updates["checkpoint_path"] = str(
-        persist_job_checkpoint({**state, **updates}, manifest, suffix=f"repair_{attempt}")
+        persist_job_checkpoint(
+            {**state, **updates}, manifest, suffix=f"repair_{attempt}"
+        )
     )
     return updates

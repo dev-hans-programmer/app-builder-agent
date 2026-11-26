@@ -9,6 +9,7 @@ import os
 import time
 import re
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from src.graph.state import BuilderState
@@ -80,6 +81,91 @@ def parse_code_blocks(content: str) -> dict[str, str]:
     return files
 
 
+def parse_generation_response(
+    content: str, task: dict | None = None
+) -> tuple[dict[str, str], dict]:
+    """Parse the preferred traceable JSON envelope, with legacy fence fallback."""
+    cleaned = content.strip()
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        candidate = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        candidate = re.sub(r"\s*```$", "", candidate)
+    else:
+        candidate = cleaned
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError:
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start < 0 or end <= start:
+            return parse_code_blocks(content), {"format": "filename_blocks"}
+        try:
+            payload = json.loads(candidate[start : end + 1])
+        except json.JSONDecodeError:
+            return parse_code_blocks(content), {"format": "filename_blocks"}
+    if not isinstance(payload, dict) or not isinstance(payload.get("files"), list):
+        return parse_code_blocks(content), {"format": "filename_blocks"}
+    if task and payload.get("task_id") not in {None, task.get("id")}:
+        raise ValueError(
+            f"Generation response task_id {payload.get('task_id')!r} does not match {task.get('id')!r}"
+        )
+    files: dict[str, str] = {}
+    for item in payload["files"]:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        file_content = item.get("content")
+        if path and isinstance(file_content, str):
+            if path in files:
+                raise ValueError(
+                    f"Generation response contains duplicate file path: {path}"
+                )
+            files[path] = file_content
+    return files, {
+        "format": "json",
+        "acceptance_criteria_ids": payload.get("acceptance_criteria_ids", []),
+        "policy_rule_ids": payload.get("policy_rule_ids", []),
+    }
+
+
+def validate_task_file_scope(files: dict[str, str], task: dict) -> None:
+    """Reject model writes outside the task's declared ownership boundary."""
+    allowed = [str(path).rstrip("/") for path in task.get("allowed_paths", [])]
+    if not allowed:
+        return
+    for filepath in files:
+        # pathlib already collapses a leading `./`. Do not use lstrip here:
+        # it treats its argument as a character set and corrupts dotfiles such
+        # as `.python-version` into `python-version`.
+        normalized = Path(filepath).as_posix()
+        if not any(
+            normalized == path or normalized.startswith(f"{path}/") for path in allowed
+        ):
+            raise ValueError(
+                f"Task {task.get('id')} attempted undeclared file {filepath!r}; "
+                f"allowed paths: {', '.join(allowed)}"
+            )
+
+
+def validate_generation_metadata(metadata: dict, task: dict) -> None:
+    """Require the model to echo the exact IDs that define task completion."""
+    if metadata.get("format") != "json":
+        raise ValueError(
+            f"Task {task.get('id')} returned the legacy filename-block format; "
+            "Python production tasks must return the documented JSON envelope"
+        )
+    expected = {
+        "acceptance_criteria_ids": set(task.get("acceptance_criteria_ids", [])),
+        "policy_rule_ids": set(task.get("policy_rule_ids", [])),
+    }
+    for field, expected_ids in expected.items():
+        actual = metadata.get(field, [])
+        if not isinstance(actual, list) or set(actual) != expected_ids:
+            raise ValueError(
+                f"Task {task.get('id')} returned incorrect {field}: "
+                f"expected {sorted(expected_ids)}, got {actual!r}"
+            )
+
+
 def extract_response_text(response) -> str:
     """
     Extract assistant text from an OpenAI chat completion response.
@@ -106,11 +192,17 @@ def extract_response_text(response) -> str:
 
 
 def _sha256_text(content: str | None) -> str | None:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest() if content is not None else None
+    return (
+        hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if content is not None
+        else None
+    )
 
 
 def _safe_output_path(base_path: Path, filepath: str) -> Path:
     """Resolve a model-provided path and reject writes outside the build root."""
+    if "\\" in filepath:
+        raise ValueError(f"Generated path must use forward slashes: {filepath}")
     relative = Path(filepath)
     if relative.is_absolute():
         raise ValueError(f"Generated path must be relative: {filepath}")
@@ -128,7 +220,9 @@ def apply_file_patches(output_dir: str | Path, files: dict[str, str]) -> list[di
     patches: list[dict] = []
     for filepath, content in files.items():
         full_path = _safe_output_path(base_path, filepath)
-        previous = full_path.read_text(encoding="utf-8") if full_path.is_file() else None
+        previous = (
+            full_path.read_text(encoding="utf-8") if full_path.is_file() else None
+        )
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding="utf-8")
         patches.append(
@@ -197,7 +291,11 @@ def write_files(output_dir: str, files: dict[str, str]) -> None:
     apply_file_patches(output_dir, files)
 
 
-def _generation_tasks(state: BuilderState) -> list[dict]:
+def _generation_tasks(state: BuilderState, stack: str = "python") -> list[dict]:
+    if stack == "python":
+        python_tasks = list((state.get("execution_plan") or {}).get("python_tasks", []))
+        if python_tasks:
+            return python_tasks
     tasks = list((state.get("execution_plan") or {}).get("tasks", []))
     if tasks:
         return tasks
@@ -214,7 +312,11 @@ def _generation_tasks(state: BuilderState) -> list[dict]:
 
 
 def _aggregate_observability(items: list[dict], model: str, version: str) -> dict:
-    result: dict = {"model": model, "prompt_version": version, "model_calls": len(items)}
+    result: dict = {
+        "model": model,
+        "prompt_version": version,
+        "model_calls": len(items),
+    }
     for key in (
         "input_tokens",
         "output_tokens",
@@ -224,13 +326,17 @@ def _aggregate_observability(items: list[dict], model: str, version: str) -> dic
         "total_tokens",
         "estimated_cost",
     ):
-        values = [item.get(key) for item in items if isinstance(item.get(key), (int, float))]
+        values = [
+            item.get(key) for item in items if isinstance(item.get(key), (int, float))
+        ]
         result[key] = sum(values) if values else None
     if items:
         result["prompt_hash"] = items[-1].get("prompt_hash")
         result["model_request_id"] = items[-1].get("model_request_id")
         result["model_request_ids"] = [
-            item.get("model_request_id") for item in items if item.get("model_request_id")
+            item.get("model_request_id")
+            for item in items
+            if item.get("model_request_id")
         ]
         result["finish_reason"] = items[-1].get("finish_reason")
         result.update(
@@ -267,7 +373,9 @@ def record_generation_task_event(
         try:
             path = Path(artifact_path)
             if path.is_file():
-                artifact_hashes[artifact_path] = hashlib.sha256(path.read_bytes()).hexdigest()
+                artifact_hashes[artifact_path] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
         except OSError:
             continue
     artifact_hashes.update(
@@ -287,12 +395,16 @@ def record_generation_task_event(
             "stack": stack,
             "spec_id": task.get("spec_id"),
             "task_id": task.get("id"),
-            "acceptance_criterion_id": (task.get("acceptance_criteria_ids") or [None])[0],
+            "acceptance_criterion_id": (task.get("acceptance_criteria_ids") or [None])[
+                0
+            ],
             "attempt": attempt,
             "status": status,
             "usage_detail": True,
             "started_at": started_at,
-            "ended_at": datetime.now(timezone.utc).isoformat() if event_type.endswith("finished") else None,
+            "ended_at": datetime.now(timezone.utc).isoformat()
+            if event_type.endswith("finished")
+            else None,
             "duration_ms": duration_ms,
             "input_artifacts": input_artifacts or [],
             "output_artifacts": output_artifacts or [],
@@ -488,7 +600,7 @@ def build(state: BuilderState) -> dict:
             ".", project_name=state.get("project_name")
         )
         output_dir = Path(manifest["builds_dir"]) / "python"
-        tasks = _generation_tasks(state)
+        tasks = _generation_tasks(state, "python")
         api_key = os.getenv("OPENAI_API_KEY")
         first_prompt = create_python_prompt(
             state["user_prompt"],
@@ -497,6 +609,7 @@ def build(state: BuilderState) -> dict:
             requirements=state.get("requirements") or {},
             architecture=state.get("architecture_plan") or {},
             current_files=read_project_files(output_dir),
+            backend_policy=state.get("backend_policy") or {},
         )
         observability = model_observability(
             model=model,
@@ -524,7 +637,9 @@ def build(state: BuilderState) -> dict:
         request_options = chat_completion_options(model)
         usage_items: list[dict] = []
         all_paths: list[str] = []
-        print(f"[Python Builder] Generating {len(tasks)} task(s) for: {state['project_name']}")
+        print(
+            f"[Python Builder] Generating {len(tasks)} task(s) for: {state['project_name']}"
+        )
         for index, task in enumerate(tasks, start=1):
             current_task = task
             current_task_started = datetime.now(timezone.utc).isoformat()
@@ -538,9 +653,16 @@ def build(state: BuilderState) -> dict:
                 requirements=state.get("requirements") or {},
                 architecture=state.get("architecture_plan") or {},
                 current_files=current_files,
+                backend_policy=state.get("backend_policy") or {},
             )
-            prompt_artifact = "prompt.txt" if len(tasks) == 1 else f"task-{index:02d}-prompt.txt"
-            response_artifact = "response.json" if len(tasks) == 1 else f"task-{index:02d}-response.json"
+            prompt_artifact = (
+                "prompt.txt" if len(tasks) == 1 else f"task-{index:02d}-prompt.txt"
+            )
+            response_artifact = (
+                "response.json"
+                if len(tasks) == 1
+                else f"task-{index:02d}-response.json"
+            )
             prompt_path = record_step_artifact(prompt_artifact, prompt)
             record_generation_task_event(
                 state,
@@ -550,7 +672,10 @@ def build(state: BuilderState) -> dict:
                 attempt=1,
                 started_at=current_task_started,
                 status="started",
-                input_artifacts=[*current_input_artifacts, *([prompt_path] if prompt_path else [])],
+                input_artifacts=[
+                    *current_input_artifacts,
+                    *([prompt_path] if prompt_path else []),
+                ],
             )
             response = client.chat.completions.create(
                 model=model,
@@ -578,9 +703,14 @@ def build(state: BuilderState) -> dict:
                 },
             )
             require_visible_completion(content, response, request_options)
-            files = parse_code_blocks(content)
+            files, response_metadata = parse_generation_response(content, task)
             if not files:
-                raise ValueError(f"No files generated for {task.get('id', f'TASK-{index:03d}')}")
+                raise ValueError(
+                    f"No files generated for {task.get('id', f'TASK-{index:03d}')}"
+                )
+            if (state.get("backend_policy") or {}).get("enabled"):
+                validate_generation_metadata(response_metadata, task)
+            validate_task_file_scope(files, task)
             patches = apply_file_patches(output_dir, files)
             all_paths.extend(files)
             task_runs.append(
@@ -590,6 +720,8 @@ def build(state: BuilderState) -> dict:
                     "status": "completed",
                     "acceptance_criteria_ids": task.get("acceptance_criteria_ids", []),
                     "contract_ids": task.get("contract_ids", []),
+                    "policy_rule_ids": task.get("policy_rule_ids", []),
+                    "response_format": response_metadata.get("format"),
                     "patches": patches,
                 }
             )
@@ -642,7 +774,9 @@ def build(state: BuilderState) -> dict:
                     task=current_task,
                     attempt=1,
                     started_at=current_task_started,
-                    duration_ms=round((time.perf_counter() - current_task_clock) * 1000, 2),
+                    duration_ms=round(
+                        (time.perf_counter() - current_task_clock) * 1000, 2
+                    ),
                     status="failed",
                     input_artifacts=current_input_artifacts,
                     observability=current_usage,

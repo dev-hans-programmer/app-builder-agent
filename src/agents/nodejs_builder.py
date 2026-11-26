@@ -220,7 +220,7 @@ def build(state: BuilderState) -> dict:
             ".", project_name=state.get("project_name")
         )
         output_dir = Path(manifest["builds_dir"]) / "nodejs"
-        tasks = _generation_tasks(state)
+        tasks = _generation_tasks(state, "nodejs")
         api_key = os.getenv("OPENAI_API_KEY")
         first_prompt = create_nodejs_prompt(
             state["user_prompt"],
@@ -256,7 +256,9 @@ def build(state: BuilderState) -> dict:
         request_options = chat_completion_options(model)
         usage_items: list[dict] = []
         all_paths: list[str] = []
-        print(f"[Node.js Builder] Generating {len(tasks)} task(s) for: {state['project_name']}")
+        print(
+            f"[Node.js Builder] Generating {len(tasks)} task(s) for: {state['project_name']}"
+        )
         for index, task in enumerate(tasks, start=1):
             current_task = task
             current_task_started = datetime.now(timezone.utc).isoformat()
@@ -271,8 +273,14 @@ def build(state: BuilderState) -> dict:
                 architecture=state.get("architecture_plan") or {},
                 current_files=current_files,
             )
-            prompt_artifact = "prompt.txt" if len(tasks) == 1 else f"task-{index:02d}-prompt.txt"
-            response_artifact = "response.json" if len(tasks) == 1 else f"task-{index:02d}-response.json"
+            prompt_artifact = (
+                "prompt.txt" if len(tasks) == 1 else f"task-{index:02d}-prompt.txt"
+            )
+            response_artifact = (
+                "response.json"
+                if len(tasks) == 1
+                else f"task-{index:02d}-response.json"
+            )
             prompt_path = record_step_artifact(prompt_artifact, prompt)
             record_generation_task_event(
                 state,
@@ -282,7 +290,10 @@ def build(state: BuilderState) -> dict:
                 attempt=1,
                 started_at=current_task_started,
                 status="started",
-                input_artifacts=[*current_input_artifacts, *([prompt_path] if prompt_path else [])],
+                input_artifacts=[
+                    *current_input_artifacts,
+                    *([prompt_path] if prompt_path else []),
+                ],
             )
             response = client.chat.completions.create(
                 model=model,
@@ -312,7 +323,9 @@ def build(state: BuilderState) -> dict:
             require_visible_completion(content, response, request_options)
             files = parse_code_blocks(content)
             if not files:
-                raise ValueError(f"No files generated for {task.get('id', f'TASK-{index:03d}')}")
+                raise ValueError(
+                    f"No files generated for {task.get('id', f'TASK-{index:03d}')}"
+                )
             patches = apply_file_patches(output_dir, files)
             all_paths.extend(files)
             task_runs.append(
@@ -374,7 +387,9 @@ def build(state: BuilderState) -> dict:
                     task=current_task,
                     attempt=1,
                     started_at=current_task_started,
-                    duration_ms=round((time.perf_counter() - current_task_clock) * 1000, 2),
+                    duration_ms=round(
+                        (time.perf_counter() - current_task_clock) * 1000, 2
+                    ),
                     status="failed",
                     input_artifacts=current_input_artifacts,
                     observability=current_usage,

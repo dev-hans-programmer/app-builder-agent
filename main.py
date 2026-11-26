@@ -234,13 +234,25 @@ def display_results(final_state: dict[str, Any]):
     job_status = final_state.get("job_status", "")
     target_stack = final_state.get("target_stack", "both")
     selected_stacks = _requested_stacks(target_stack)
+    quality_stacks = {
+        str(item.get("stack")): item
+        for item in (final_state.get("quality_results") or {}).get("stacks", [])
+        if isinstance(item, dict) and item.get("stack")
+    }
+
+    def _stack_succeeded(stack: str, generation_status: str) -> bool:
+        quality = quality_stacks.get(stack)
+        return generation_status == "success" and (
+            quality is None or bool(quality.get("passed"))
+        )
+
     python_output = final_state.get("python_output", {}) or {}
     python_status = python_output.get("status", "unknown")
     python_time = _safe_duration(final_state.get("python_build_time"))
     python_files = python_output.get("file_count", 0)
     python_dir = python_output.get("output_dir", "N/A")
 
-    if python_status == "success":
+    if _stack_succeeded("python", python_status):
         python_status_icon = "✅ Success"
         python_status_style = "green"
     elif job_status == "paused" and not python_output:
@@ -265,7 +277,7 @@ def display_results(final_state: dict[str, Any]):
     nodejs_files = nodejs_output.get("file_count", 0)
     nodejs_dir = nodejs_output.get("output_dir", "N/A")
 
-    if nodejs_status == "success":
+    if _stack_succeeded("nodejs", nodejs_status):
         nodejs_status_icon = "✅ Success"
         nodejs_status_style = "green"
     elif job_status == "paused" and not nodejs_output:
@@ -698,20 +710,30 @@ def _run_build_flow(
                 f"• [cyan]{(final_state.get('nodejs_output') or {}).get('output_dir', 'N/A')}[/cyan]"
             )
         quality_report = (final_state.get("quality_results") or {}).get("artifact_path")
-        traceability_report = (final_state.get("traceability_result") or {}).get("artifact_path")
+        traceability_report = (final_state.get("traceability_result") or {}).get(
+            "artifact_path"
+        )
         report_lines = [
             line
             for line in (
                 f"• Quality: [cyan]{quality_report}[/cyan]" if quality_report else "",
-                f"• Traceability: [cyan]{traceability_report}[/cyan]" if traceability_report else "",
+                f"• Traceability: [cyan]{traceability_report}[/cyan]"
+                if traceability_report
+                else "",
             )
             if line
         ]
         console.print(
             Panel(
                 "[bold green]✨ Build complete![/bold green]\n\n"
-                "Your backend is ready in:\n" + "\n".join(output_lines) + "\n\n"
-                + ("Verification evidence:\n" + "\n".join(report_lines) + "\n\n" if report_lines else "")
+                "Your backend is ready in:\n"
+                + "\n".join(output_lines)
+                + "\n\n"
+                + (
+                    "Verification evidence:\n" + "\n".join(report_lines) + "\n\n"
+                    if report_lines
+                    else ""
+                )
                 + "[dim]Next step: review the generated contracts, code, and verification evidence.[/dim]",
                 title="[bold green]🎉 Success[/bold green]",
                 border_style="green",

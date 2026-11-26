@@ -160,6 +160,7 @@ class BuilderState(TypedDict):
     clarification_gate_enabled: NotRequired[bool]
     input_type: NotRequired[str]
     raw_request: NotRequired[str]
+    backend_policy: NotRequired[Dict[str, Any]]
     requirements: NotRequired[Dict[str, Any]]
     clarification_answers: NotRequired[Dict[str, Any]]
     architecture_plan: NotRequired[Dict[str, Any]]
@@ -323,6 +324,7 @@ def create_initial_state(
         clarification_gate_enabled=gate_enabled,
         input_type=job_metadata["input_type"],
         raw_request=job_metadata["raw_request"],
+        backend_policy=None,
         requirements=None,
         architecture_plan=None,
         spec_tree=None,

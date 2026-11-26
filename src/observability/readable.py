@@ -10,6 +10,7 @@ from uuid import uuid4
 
 STEP_DESCRIPTIONS = {
     "parse_input": "Validate the request and selected stack.",
+    "backend_policy": "Load and snapshot the Python production architecture policy.",
     "requirement_analysis": "Turn the request into explicit requirements and acceptance context.",
     "acceptance_approval": "Freeze the submitted requirements as approved acceptance criteria.",
     "clarification_gate": "Resolve explicitly supplied open questions.",
@@ -43,7 +44,11 @@ def step_slug(step_id: str) -> str:
 
 
 def _cell(value: Any) -> str:
-    return str(value if value not in (None, "") else "—").replace("|", "\\|").replace("\n", " ")
+    return (
+        str(value if value not in (None, "") else "—")
+        .replace("|", "\\|")
+        .replace("\n", " ")
+    )
 
 
 def _relative_path(path: str | Path, run_dir: Path) -> str:
@@ -144,7 +149,9 @@ def render_model_artifact(
             "cached_tokens",
             "estimated_cost",
         ):
-            lines.append(f"| {key.replace('_', ' ').title()} | {_cell(usage.get(key))} |")
+            lines.append(
+                f"| {key.replace('_', ' ').title()} | {_cell(usage.get(key))} |"
+            )
     lines.extend(
         [
             "",
@@ -203,7 +210,11 @@ def _outcome_summary(
             f"{output.get('output_dir', 'the build directory')}."
         )
     if step_id == "requirement_analysis":
-        requirements = result.get("requirements") if isinstance(result.get("requirements"), Mapping) else {}
+        requirements = (
+            result.get("requirements")
+            if isinstance(result.get("requirements"), Mapping)
+            else {}
+        )
         return f"Captured {len(requirements.get('functional_requirements', []))} functional requirement(s)."
     if step_id == "verification":
         history = result.get("verification_results") or []
@@ -283,7 +294,9 @@ def write_step_finished(
         )
     if error_message or suggested_fix:
         attention_title = (
-            "Why this step was skipped" if status == "skipped" else "What needs attention"
+            "Why this step was skipped"
+            if status == "skipped"
+            else "What needs attention"
         )
         lines.extend(
             [
@@ -330,7 +343,9 @@ def write_run_views(
     for index, event in enumerate(finished, start=1):
         report = event.get("step_report")
         report_link = _relative_link(str(report), run_dir) if report else "—"
-        tokens = int(event.get("input_tokens") or 0) + int(event.get("output_tokens") or 0)
+        tokens = int(event.get("input_tokens") or 0) + int(
+            event.get("output_tokens") or 0
+        )
         timeline_lines.append(
             "| {index} | {step} | {attempt} | {status} | {duration} ms | {model} | {tokens} | {report} |".format(
                 index=index,
@@ -344,7 +359,9 @@ def write_run_views(
             )
         )
     if not finished:
-        timeline_lines.append("| 1 | Workflow initialization | — | running | — | — | 0 | — |")
+        timeline_lines.append(
+            "| 1 | Workflow initialization | — | running | — | — | 0 | — |"
+        )
     _atomic_text(Path(paths["timeline_path"]), "\n".join(timeline_lines))
 
     status = str(summary.get("status") or state.get("job_status") or "running")
@@ -383,7 +400,9 @@ def write_run_views(
                     f"- Problem: {item.get('message') or 'See the step report.'}",
                     f"- Recommended action: {item.get('suggested_fix') or 'Inspect and retry the step.'}",
                     *(
-                        [f"- Step report: {_relative_link(str(item['step_report']), run_dir)}"]
+                        [
+                            f"- Step report: {_relative_link(str(item['step_report']), run_dir)}"
+                        ]
                         if item.get("step_report")
                         else []
                     ),
@@ -391,7 +410,9 @@ def write_run_views(
                 ]
             )
     else:
-        report_lines.extend(["No failed or blocked steps currently need attention.", ""])
+        report_lines.extend(
+            ["No failed or blocked steps currently need attention.", ""]
+        )
     report_lines.extend(
         [
             "## Usage",
