@@ -20,7 +20,6 @@ class TestFinalReporter:
         ]
         state["repair_history"] = [{"status": "completed"}]
         state["python_output"] = {"status": "success"}
-        state["nodejs_output"] = {"status": "success"}
 
         summary = build_delivery_summary(state)
 
@@ -36,7 +35,6 @@ class TestFinalReporter:
         state["job_status"] = "completed"
         state["current_phase"] = "completed"
         state["python_output"] = {"status": "success"}
-        state["nodejs_output"] = {"status": "success"}
 
         result = persist_delivery_summary(state)
 
@@ -47,17 +45,12 @@ class TestFinalReporter:
         assert checkpoint_path.exists()
         assert summary_path.read_text(encoding="utf-8").startswith("# Delivery Summary")
 
-    def test_single_stack_summary_marks_other_stack_not_requested(self, tmp_path):
-        state = create_initial_state(
-            "Build API",
-            "demo project",
-            target_stack="python",
-        )
+    def test_summary_identifies_python_language(self, tmp_path):
+        state = create_initial_state("Build API", "demo project")
         state["artifacts"] = ensure_workspace_layout(tmp_path)
         state["python_output"] = {"status": "success"}
 
         summary = build_delivery_summary(state)
 
-        assert "**Target Stack**: python" in summary
+        assert "**Language**: Python" in summary
         assert "Python output: success" in summary
-        assert "Node.js output: not requested" in summary

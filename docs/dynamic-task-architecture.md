@@ -4,7 +4,7 @@
 
 Dynamic execution replaces the fixed foundation/platform/authentication/feature/delivery sequence
 with a validated dependency graph sized from approved acceptance criteria and architecture
-contracts. It is currently Python-only. Node.js and dual-stack runs remain on the legacy workflow.
+contracts. It is the standard task architecture for the Python-only workflow.
 
 Enable the rollout mode with:
 

@@ -20,9 +20,7 @@ from src.prompts.python_builder_prompt import create_python_prompt
 def _load_policy(tmp_path: Path, monkeypatch) -> dict:
     monkeypatch.delenv("BACKEND_POLICY_PATH", raising=False)
     monkeypatch.chdir(tmp_path)
-    state = create_initial_state(
-        "Build a todo API", "policy-test", target_stack="python"
-    )
+    state = create_initial_state("Build a todo API", "policy-test")
     state["artifacts"] = ensure_workspace_layout(tmp_path, project_name="policy-test")
     return load_backend_policy(state)["backend_policy"]
 
@@ -40,18 +38,6 @@ def test_policy_is_loaded_exactly_and_snapshotted_for_python(tmp_path, monkeypat
         Path(policy["artifact_paths"]["policy_snapshot_markdown"]).read_bytes()
         == Path(policy["source_path"]).read_bytes()
     )
-
-
-def test_policy_is_disabled_for_nodejs_only(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("BACKEND_POLICY_PATH", str(tmp_path / "missing.md"))
-    state = create_initial_state("Build an API", "node", target_stack="nodejs")
-    state["artifacts"] = ensure_workspace_layout(tmp_path, project_name="node")
-
-    policy = load_backend_policy(state)["backend_policy"]
-
-    assert policy["enabled"] is False
-    assert "Node.js-only" in policy["reason"]
 
 
 def test_python_architecture_tasks_and_prompt_are_policy_bound(tmp_path, monkeypatch):

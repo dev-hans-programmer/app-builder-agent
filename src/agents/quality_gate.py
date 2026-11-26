@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
 import os
 import shutil
@@ -271,82 +270,6 @@ def _python_commands(
     ]
 
 
-def _node_commands(root: Path) -> list[tuple[str, list[str] | None, bool, str]]:
-    package_path = root / "package.json"
-    if not package_path.is_file():
-        return [
-            (
-                category,
-                None,
-                category in {"build", "test", "smoke"},
-                "package.json was not generated",
-            )
-            for category in ("build", "lint", "type", "test", "smoke")
-        ]
-    try:
-        package = json.loads(package_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        package = {}
-    scripts = (
-        package.get("scripts", {}) if isinstance(package.get("scripts"), dict) else {}
-    )
-    entry = package.get("main") or next(
-        (
-            name
-            for name in ("server.js", "app.js", "index.js")
-            if (root / name).is_file()
-        ),
-        None,
-    )
-    node = shutil.which("node")
-    npm = shutil.which("npm")
-    build_command = (
-        [npm, "run", "build"]
-        if npm and "build" in scripts
-        else ([node, "--check", str(entry)] if node and entry else None)
-    )
-    return [
-        (
-            "dependencies",
-            [npm, "install", "--ignore-scripts", "--no-audit", "--no-fund"]
-            if npm
-            else None,
-            True,
-            "npm is not installed.",
-        ),
-        (
-            "build",
-            build_command,
-            True,
-            "No build script or JavaScript entry point was generated.",
-        ),
-        (
-            "lint",
-            [npm, "run", "lint"] if npm and "lint" in scripts else None,
-            False,
-            "No lint script is configured.",
-        ),
-        (
-            "type",
-            [npm, "run", "typecheck"] if npm and "typecheck" in scripts else None,
-            False,
-            "No typecheck script is configured.",
-        ),
-        (
-            "test",
-            [npm, "test"] if npm and "test" in scripts else None,
-            True,
-            "No test script is configured.",
-        ),
-        (
-            "smoke",
-            [node, "--check", str(entry)] if node and entry else None,
-            True,
-            "Node.js or an application entry point is unavailable.",
-        ),
-    ]
-
-
 def evaluate_stack(
     stack: str,
     output: dict[str, Any],
@@ -406,11 +329,7 @@ def evaluate_stack(
                 ),
             }
         )
-    definitions = (
-        _python_commands(root, production_policy=bool(policy.get("enabled")))
-        if stack == "python"
-        else _node_commands(root)
-    )
+    definitions = _python_commands(root, production_policy=bool(policy.get("enabled")))
     checks.extend(
         [
             _run_check(
@@ -485,12 +404,7 @@ def run_quality_gate(state: BuilderState) -> dict[str, Any]:
     manifest = state.get("artifacts") or ensure_workspace_layout(
         ".", project_name=state.get("project_name")
     )
-    selected: list[tuple[str, dict[str, Any]]] = []
-    target = state.get("target_stack", "both")
-    if target in {"python", "both"}:
-        selected.append(("python", state.get("python_output") or {}))
-    if target in {"nodejs", "both"}:
-        selected.append(("nodejs", state.get("nodejs_output") or {}))
+    selected = [("python", state.get("python_output") or {})]
     stacks = [
         evaluate_stack(
             stack,

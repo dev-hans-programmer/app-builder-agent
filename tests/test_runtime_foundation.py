@@ -22,11 +22,7 @@ from src.graph import (
     save_checkpoint,
     validate_state,
 )
-from src.graph.workflow import (
-    comparison_placeholder,
-    nodejs_builder_placeholder,
-    python_builder_placeholder,
-)
+from src.graph.workflow import python_builder_placeholder
 
 
 class TestJobMetadata:
@@ -207,12 +203,8 @@ class TestWorkflowPlaceholders:
         state = create_initial_state("Build API", "Test Project")
 
         python_result = python_builder_placeholder(state)
-        nodejs_result = nodejs_builder_placeholder(state)
-        comparison_result = comparison_placeholder(state)
 
         assert python_result["python_output"]["status"] == "placeholder"
-        assert nodejs_result["nodejs_output"]["status"] == "placeholder"
-        assert "Comparison Report" in comparison_result["comparison_report"]
 
 
 class TestStateValidationEdges:

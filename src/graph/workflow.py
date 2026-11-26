@@ -1,9 +1,9 @@
 """
-LangGraph workflow definition for the Dual-Stack Backend Builder Agent.
+LangGraph workflow definition for the Python Project Builder Agent.
 
 This module defines the workflow graph that orchestrates the multi-agent system,
 including requirement analysis, clarification gating, architecture planning,
-spec decomposition, execution planning, and parallel build execution.
+spec decomposition, execution planning, and Python project generation.
 """
 
 from langgraph.graph import StateGraph, END
@@ -18,16 +18,8 @@ def _terminal_job_status(state: BuilderState) -> str:
     if current_status in {"failed", "blocked"}:
         return current_status
 
-    target_stack = state.get("target_stack", "both")
-    selected_outputs = []
-    if target_stack in {"python", "both"}:
-        selected_outputs.append(state.get("python_output") or {})
-    if target_stack in {"nodejs", "both"}:
-        selected_outputs.append(state.get("nodejs_output") or {})
-
-    if not selected_outputs or any(
-        output.get("status") != "success" for output in selected_outputs
-    ):
+    python_output = state.get("python_output") or {}
+    if python_output.get("status") != "success":
         return "failed"
 
     quality = state.get("quality_results") or {}
@@ -35,17 +27,6 @@ def _terminal_job_status(state: BuilderState) -> str:
         return "failed"
     traceability = state.get("traceability_result") or {}
     if traceability and not traceability.get("passed"):
-        return "failed"
-
-    comparison = state.get("comparison_metadata") or {}
-    builders_succeeded = selected_outputs and all(
-        output.get("status") == "success" for output in selected_outputs
-    )
-    if (
-        target_stack == "both"
-        and builders_succeeded
-        and comparison.get("status") == "failed"
-    ):
         return "failed"
 
     return "completed"
@@ -78,21 +59,15 @@ def parse_input_node(state: BuilderState) -> BuilderState:
     if not state.get("project_name"):
         state["errors"].append("Project name is required")
 
-    # Checkpoints created before stack selection was introduced remain
-    # compatible and preserve the original dual-stack behavior.
-    state.setdefault("target_stack", "both")
-    if state["target_stack"] not in {"python", "nodejs", "both"}:
-        state["errors"].append("Target stack must be one of: python, nodejs, both")
-
     return state
 
 
 def generate_report_node(state: BuilderState) -> BuilderState:
     """
-    Generate final output and save comparison report to disk.
+    Generate the final delivery report and checkpoint.
 
     This is the final node before END. Creates the ./reports/ directory
-    if it doesn't exist and saves the comparison report with a timestamped filename.
+    if it does not exist and saves the final delivery summary.
 
     Args:
         state: Current workflow state
@@ -102,16 +77,11 @@ def generate_report_node(state: BuilderState) -> BuilderState:
 
     Example:
         >>> state = create_initial_state("Test", "test")
-        >>> state["comparison_report"] = "# Report content"
         >>> state = generate_report_node(state)
-        # Report saved to ./reports/comparison-<timestamp>.md
     """
     from pathlib import Path
     from src.graph.runtime import ensure_workspace_layout
-    from src.agents.final_reporter import (
-        build_delivery_summary,
-        persist_delivery_summary,
-    )
+    from src.agents.final_reporter import persist_delivery_summary
 
     manifest = state.get("artifacts") or ensure_workspace_layout(
         ".",
@@ -128,15 +98,6 @@ def generate_report_node(state: BuilderState) -> BuilderState:
         "completed",
         status=_terminal_job_status(state),
     )
-    delivery_summary = build_delivery_summary(state)
-    comparison_report = state.get("comparison_report")
-    if comparison_report:
-        timestamp = state["timestamp"].replace(":", "-").replace(".", "-")
-        filepath = reports_dir / f"comparison-{timestamp}.md"
-        report_content = f"{comparison_report}\n\n---\n\n{delivery_summary}"
-        filepath.write_text(report_content, encoding="utf-8")
-        state["artifacts"]["comparison_report_markdown"] = str(filepath)
-
     summary_paths = persist_delivery_summary(state)
     state["artifacts"] = state.get("artifacts", {})
     state["artifacts"].update(summary_paths)
@@ -170,16 +131,6 @@ def _route_after_clarification_gate(state: BuilderState) -> str:
     return "acceptance_approval"
 
 
-def _route_to_builders(state: BuilderState) -> list[str]:
-    """Select one or both code-generation branches for this job."""
-    target_stack = state.get("target_stack", "both")
-    if target_stack == "python":
-        return ["python_builder"]
-    if target_stack == "nodejs":
-        return ["nodejs_builder"]
-    return ["python_builder", "nodejs_builder"]
-
-
 def start_generation_node(state: BuilderState) -> dict:
     """Mark the transition from planning into task-level code generation."""
     return {"current_phase": "generation", "job_status": "running"}
@@ -203,16 +154,7 @@ def _route_after_quality_gate(state: BuilderState) -> str:
     return "traceability"
 
 
-def _route_after_traceability(state: BuilderState) -> str:
-    """Compare only complete dual-stack deliveries."""
-    if state.get("target_stack", "both") == "both" and (
-        state.get("traceability_result") or {}
-    ).get("passed"):
-        return "comparison"
-    return "generate_report"
-
-
-# Placeholder functions (will be replaced in Specs 004-006)
+# Placeholder function retained for offline workflow tests.
 
 
 def python_builder_placeholder(state: BuilderState) -> dict:
@@ -237,56 +179,13 @@ def python_builder_placeholder(state: BuilderState) -> dict:
     }
 
 
-def nodejs_builder_placeholder(state: BuilderState) -> dict:
-    """
-    Placeholder for Node.js builder (Spec 005).
-
-    This placeholder will be replaced with the actual Node.js/Express
-    builder implementation in Spec 005.
-
-    Args:
-        state: Current workflow state
-
-    Returns:
-        Dict with only nodejs_output field for state update
-    """
-    print("[placeholder] Node.js builder would run here")
-    return {
-        "nodejs_output": {
-            "status": "placeholder",
-            "message": "Node.js builder not yet implemented",
-        }
-    }
-
-
-def comparison_placeholder(state: BuilderState) -> dict:
-    """
-    Placeholder for comparison agent (Spec 006).
-
-    This placeholder will be replaced with the actual comparison agent
-    implementation in Spec 006.
-
-    Args:
-        state: Current workflow state
-
-    Returns:
-        Dict with only comparison_report field for state update
-    """
-    print("[placeholder] Comparison agent would run here")
-    return {
-        "comparison_report": "# Comparison Report\n\nPlaceholder - not yet implemented"
-    }
-
-
 def create_workflow(
     *, checkpointer=None, interrupt_after: list[str] | None = None
 ) -> StateGraph:
     """
     Create and compile the LangGraph workflow.
 
-    Builds a workflow graph that orchestrates the dual-stack backend builder
-    system with spec-driven planning and parallel execution of Python and
-    Node.js builders.
+    Build the Python-only project generation workflow.
 
     Workflow structure:
         START
@@ -303,15 +202,13 @@ def create_workflow(
           ↓
         planning (execution schedule)
           ↓
-        selected builder(s)
+        python_builder
           ↓
         quality_gate (build/lint/type/test/smoke)
           ↓
         targeted_repair (bounded loop when checks fail)
           ↓
         traceability (requirements to verified patches)
-          ↓
-        comparison (dual-stack jobs only)
           ↓
         generate_report (saves to disk)
           ↓
@@ -325,12 +222,9 @@ def create_workflow(
         >>> state = create_initial_state("Build API", "test")
         >>> final_state = workflow.invoke(state)
         >>> assert final_state["python_output"] is not None
-        >>> assert final_state["nodejs_output"] is not None
     """
     # Import here to avoid circular imports
     from src.agents.python_builder import build as python_builder_build
-    from src.agents.nodejs_builder import build as nodejs_builder_build
-    from src.agents.comparison import compare as comparison_agent
     from src.agents.architect import analyze_architecture
     from src.agents.clarification_gate import clarify_requirements
     from src.agents.planner import plan_execution
@@ -348,7 +242,7 @@ def create_workflow(
     workflow = StateGraph(BuilderState)
 
     # Add instrumented nodes. Parent ids describe the logical workflow even
-    # when a conditional edge skips a node or fans out both builders.
+    # when a conditional edge skips a node.
     nodes = {
         "parse_input": (parse_input_node, "workflow"),
         "backend_policy": (load_backend_policy, "parse_input"),
@@ -360,12 +254,10 @@ def create_workflow(
         "planning": (plan_execution, "spec_decomposition"),
         "generation_start": (start_generation_node, "planning"),
         "python_builder": (python_builder_build, "generation_start"),
-        "nodejs_builder": (nodejs_builder_build, "generation_start"),
-        "quality_gate": (run_quality_gate, "python_builder+nodejs_builder"),
+        "quality_gate": (run_quality_gate, "python_builder"),
         "targeted_repair": (repair_failed_checks, "quality_gate"),
         "traceability": (check_requirement_traceability, "quality_gate-or-repair"),
-        "comparison": (comparison_agent, "python_builder+nodejs_builder"),
-        "generate_report": (generate_report_node, "comparison-or-builder"),
+        "generate_report": (generate_report_node, "traceability"),
     }
     for node_name, (node, parent_step_id) in nodes.items():
         workflow.add_node(
@@ -410,26 +302,12 @@ def create_workflow(
     workflow.add_edge("spec_decomposition", "planning")
     workflow.add_edge("planning", "generation_start")
 
-    # Run only the requested builder branches. A list return value fans out both
-    # builders in the same superstep for dual-stack jobs.
+    workflow.add_edge("generation_start", "python_builder")
     workflow.add_conditional_edges(
-        "generation_start",
-        _route_to_builders,
-        {
-            "python_builder": "python_builder",
-            "nodejs_builder": "nodejs_builder",
-        },
+        "python_builder",
+        _route_after_builder,
+        {"quality_gate": "quality_gate"},
     )
-
-    # All selected generation branches join at the same post-generation gate.
-    for builder_node in ("python_builder", "nodejs_builder"):
-        workflow.add_conditional_edges(
-            builder_node,
-            _route_after_builder,
-            {
-                "quality_gate": "quality_gate",
-            },
-        )
 
     workflow.add_conditional_edges(
         "quality_gate",
@@ -440,17 +318,7 @@ def create_workflow(
         },
     )
     workflow.add_edge("targeted_repair", "quality_gate")
-    workflow.add_conditional_edges(
-        "traceability",
-        _route_after_traceability,
-        {
-            "comparison": "comparison",
-            "generate_report": "generate_report",
-        },
-    )
-
-    # After comparison, generate report
-    workflow.add_edge("comparison", "generate_report")
+    workflow.add_edge("traceability", "generate_report")
 
     # End after report generation
     workflow.add_edge("generate_report", END)

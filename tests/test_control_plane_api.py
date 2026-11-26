@@ -58,7 +58,6 @@ def _test_app(tmp_path: Path):
 def test_quality_failure_delivery_is_explicit_and_requires_generated_code() -> None:
     failed_quality_state = {
         "job_status": "failed",
-        "target_stack": "python",
         "python_output": {"status": "success"},
         "quality_results": {"passed": False},
     }
@@ -78,7 +77,6 @@ def test_quality_failure_delivery_is_explicit_and_requires_generated_code() -> N
 def test_non_quality_failures_are_not_published_by_escape_hatch() -> None:
     state = {
         "job_status": "failed",
-        "target_stack": "python",
         "python_output": {"status": "success"},
         "quality_results": {"passed": True},
         "traceability_result": {"passed": False},
@@ -99,7 +97,6 @@ def test_project_run_lifecycle_and_durable_outbox(tmp_path: Path) -> None:
 
         run_payload = {
             "request": "Build a production todo API",
-            "target_stack": "python",
             "idempotency_key": "request-1",
         }
         first = client.post(f"/api/v1/projects/{project['id']}/runs", json=run_payload)
@@ -150,6 +147,19 @@ def test_project_run_lifecycle_and_durable_outbox(tmp_path: Path) -> None:
             assert event_count >= 4
 
     asyncio.run(assert_outbox())
+
+
+def test_run_creation_rejects_language_selection(tmp_path: Path) -> None:
+    app, _, _ = _test_app(tmp_path)
+    with TestClient(app) as client:
+        project = client.post("/api/v1/projects", json={"name": "Python Only"}).json()
+
+        response = client.post(
+            f"/api/v1/projects/{project['id']}/runs",
+            json={"request": "Build an API", "target_stack": "python"},
+        )
+
+    assert response.status_code == 422
 
 
 def test_api_surface_includes_run_task_operations(tmp_path: Path) -> None:
@@ -294,7 +304,6 @@ def test_local_artifact_store_is_run_isolated_and_traversal_safe(
 def test_failed_run_prefers_quality_error_over_secondary_traceability() -> None:
     error_type, message = _failure_from_state(
         {
-            "target_stack": "python",
             "python_output": {"status": "success"},
             "quality_results": {
                 "passed": False,

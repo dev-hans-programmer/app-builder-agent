@@ -15,7 +15,6 @@ class CreateProjectCommand:
 @dataclass(frozen=True)
 class CreateRunCommand:
     request: str
-    target_stack: str = "python"
     clarification_gate_enabled: bool = False
     idempotency_key: str | None = None
     execution_mode: str | None = None

@@ -185,7 +185,6 @@ async def retry_run(run_id: UUID, session: AsyncSession = Depends(get_session)):
     project = await ProjectService(session).require(source.project_id)
     command = CreateRunCommand(
         request=source.request,
-        target_stack=source.target_stack,
         clarification_gate_enabled=source.clarification_gate_enabled,
         execution_mode=source.execution_mode,
     )

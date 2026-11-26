@@ -9,7 +9,7 @@ from uuid import uuid4
 
 
 STEP_DESCRIPTIONS = {
-    "parse_input": "Validate the request and selected stack.",
+    "parse_input": "Validate the Python project request.",
     "backend_policy": "Load and snapshot the Python production architecture policy.",
     "requirement_analysis": "Turn the request into explicit requirements and acceptance context.",
     "acceptance_approval": "Freeze the submitted requirements as approved acceptance criteria.",
@@ -17,13 +17,11 @@ STEP_DESCRIPTIONS = {
     "architecture_planning": "Define architecture, contracts, and implementation boundaries.",
     "spec_decomposition": "Break the architecture into executable specifications.",
     "planning": "Order specifications and dependencies for execution.",
-    "generation_start": "Start task-level generation for the selected stack or stacks.",
+    "generation_start": "Start task-level Python project generation.",
     "quality_gate": "Run build, lint, type, test, and smoke checks on generated code.",
     "targeted_repair": "Repair only the files implicated by failed quality checks.",
     "traceability": "Verify every approved criterion has contract, task, patch, and test evidence.",
     "python_builder": "Generate the FastAPI implementation.",
-    "nodejs_builder": "Generate the Express implementation.",
-    "comparison": "Compare successful Python and Node.js implementations.",
     "generate_report": "Create the final delivery report and checkpoint.",
 }
 
@@ -202,9 +200,12 @@ def _outcome_summary(
         return error_message or "The step did not complete successfully."
     if status == "skipped":
         return error_message or "The step was skipped."
-    if step_id in {"python_builder", "nodejs_builder"}:
-        key = "python_output" if step_id == "python_builder" else "nodejs_output"
-        output = result.get(key) if isinstance(result.get(key), Mapping) else {}
+    if step_id == "python_builder":
+        output = (
+            result.get("python_output")
+            if isinstance(result.get("python_output"), Mapping)
+            else {}
+        )
         return (
             f"Generated {output.get('file_count', 0)} files in "
             f"{output.get('output_dir', 'the build directory')}."
@@ -376,7 +377,7 @@ def write_run_views(
         "|---|---|",
         f"| Run ID | {_cell(state.get('run_id'))} |",
         f"| Job ID | {_cell(state.get('job_id'))} |",
-        f"| Stack | {_cell(state.get('target_stack', 'both'))} |",
+        "| Language | Python |",
         f"| Status | **{_cell(status)}** |",
         f"| Current phase | {_cell(summary.get('current_phase'))} |",
         f"| Started | {_cell(summary.get('started_at'))} |",

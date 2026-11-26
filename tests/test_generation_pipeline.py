@@ -27,9 +27,7 @@ def test_planning_artifacts_link_approved_criteria_to_contracts_and_tasks(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    state = create_initial_state(
-        "Build a todo API with CRUD operations", "todo", target_stack="python"
-    )
+    state = create_initial_state("Build a todo API with CRUD operations", "todo")
     state = _apply(state, analyze_requirements(state))
     state = _apply(state, approve_acceptance_criteria(state))
     state = _apply(state, analyze_architecture(state))
@@ -98,7 +96,7 @@ def test_python_builder_generates_one_patch_set_per_executable_task(
     )
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(python_builder, "OpenAI", lambda **kwargs: client)
-    state = create_initial_state("Build API", "task-patches", target_stack="python")
+    state = create_initial_state("Build API", "task-patches")
     state["artifacts"] = ensure_workspace_layout(tmp_path)
     state["execution_plan"] = {
         "tasks": [
@@ -150,7 +148,7 @@ def test_python_quality_gate_runs_required_checks(tmp_path, monkeypatch):
     assert checks["lint"]["status"] == "skipped"
     assert checks["type"]["status"] == "skipped"
 
-    state = create_initial_state("Build API", "quality-events", target_stack="python")
+    state = create_initial_state("Build API", "quality-events")
     state["python_output"] = {"status": "success", "output_dir": str(tmp_path)}
     updates = quality_gate.run_quality_gate(state)
     events = [
@@ -231,7 +229,7 @@ def test_quality_environment_isolated_and_container_has_safe_placeholder(
 
 
 def test_traceability_requires_contract_task_patch_and_quality_evidence():
-    state = create_initial_state("Build API", "traceable", target_stack="python")
+    state = create_initial_state("Build API", "traceable")
     state.update(
         {
             "requirements": {
@@ -335,7 +333,6 @@ def test_workflow_repairs_failed_quality_gate_and_rechecks(tmp_path, monkeypatch
         create_initial_state(
             "Build a todo API with CRUD operations",
             "repair-loop",
-            target_stack="python",
         )
     )
 

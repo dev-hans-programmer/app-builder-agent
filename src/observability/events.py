@@ -365,7 +365,7 @@ def _update_summary(
             "run_id": state.get("run_id"),
             "job_id": state.get("job_id"),
             "project_name": state.get("project_name"),
-            "target_stack": state.get("target_stack", "both"),
+            "language": "python",
             "status": status,
             "current_phase": state.get("current_phase", "intake"),
             "event_count": int(summary.get("event_count", 0)) + 1,
@@ -422,7 +422,7 @@ def append_event(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, A
             "parent_step_id": None,
             "phase": state.get("current_phase"),
             "node": None,
-            "stack": state.get("target_stack", "both"),
+            "stack": "python",
             "spec_id": state.get("current_spec_id"),
             "task_id": state.get("current_task_id"),
             "requirement_id": (state.get("requirements") or {}).get("id"),
@@ -489,7 +489,7 @@ def initialize_run_observability(state: dict[str, Any]) -> dict[str, str]:
             "run_id": state.get("run_id"),
             "job_id": state.get("job_id"),
             "project_name": state.get("project_name"),
-            "target_stack": state.get("target_stack", "both"),
+            "language": "python",
             "input_type": state.get("input_type", "prompt"),
             "request_hash": hashlib.sha256(
                 str(state.get("raw_request") or state.get("user_prompt") or "").encode(
@@ -609,7 +609,7 @@ def record_step_artifact(filename: str, content: Any) -> str | None:
     suffix = suffixes.get(safe_name)
     artifact_kind = safe_name
     dynamic = re.fullmatch(
-        r"((?:task-\d+|repair-\d+(?:-(?:python|nodejs))?)-(?:prompt\.txt|response\.json))",
+        r"((?:task-\d+|repair-\d+(?:-python)?)-(?:prompt\.txt|response\.json))",
         safe_name,
     )
     if suffix is None and dynamic:
@@ -658,11 +658,7 @@ def _reserve_step_report(
 
 
 def _step_stack(step_id: str, state: Mapping[str, Any]) -> str:
-    if step_id == "python_builder":
-        return "python"
-    if step_id == "nodejs_builder":
-        return "nodejs"
-    return str(state.get("target_stack", "both"))
+    return "python"
 
 
 def _start_step(
@@ -726,9 +722,7 @@ def _start_step(
 
 def _model_metadata(result: Mapping[str, Any], step_id: str) -> dict[str, Any]:
     candidates: list[Any] = []
-    if step_id == "comparison":
-        candidates.append(result.get("comparison_metadata"))
-    elif step_id == "requirement_analysis":
+    if step_id == "requirement_analysis":
         requirements = result.get("requirements")
         candidates.append(
             requirements.get("observability")
@@ -737,11 +731,6 @@ def _model_metadata(result: Mapping[str, Any], step_id: str) -> dict[str, Any]:
         )
     elif step_id == "python_builder":
         output = result.get("python_output")
-        candidates.append(
-            output.get("observability") if isinstance(output, Mapping) else None
-        )
-    elif step_id == "nodejs_builder":
-        output = result.get("nodejs_output")
         candidates.append(
             output.get("observability") if isinstance(output, Mapping) else None
         )
@@ -791,8 +780,6 @@ def _business_outcome(
 
     output_keys = {
         "python_builder": ("python_output",),
-        "nodejs_builder": ("nodejs_output",),
-        "comparison": ("comparison_metadata",),
     }.get(step_id, ())
     for key in output_keys:
         output = result.get(key)
@@ -967,11 +954,6 @@ def _finish_step(
         artifact_source = {
             "delivery_summary_markdown": result.get("delivery_summary_markdown"),
             "final_checkpoint_path": result.get("final_checkpoint_path"),
-            "comparison_report_markdown": (
-                (result.get("artifacts") or {}).get("comparison_report_markdown")
-                if isinstance(result.get("artifacts"), Mapping)
-                else None
-            ),
         }
     output_artifacts = _existing_files(artifact_source)
     for step_file in active.report_path.parent.glob(f"{active.artifact_stem}-*"):

@@ -10,7 +10,7 @@ code even when the final quality gate fails, set:
 CONTROL_PUBLISH_ON_QUALITY_FAILURE=true
 ```
 
-This escape hatch only applies when every selected builder produced code successfully. The run
+This escape hatch only applies when the Python builder produced code successfully. The run
 remains failed, preserving the quality diagnostics, while GitHub delivery is attempted normally.
 Cancellation and incomplete generation are never published.
 
@@ -57,12 +57,10 @@ after an uncertain failure, it recognizes and reuses the repository or commit cr
 
 ## Published files
 
-- Python-only run: contents of `builds/python` are placed at repository root.
-- Node.js-only run: contents of `builds/nodejs` are placed at repository root.
-- Dual-stack run: `builds/python` and `builds/nodejs` are published as subdirectories.
+The contents of `builds/python` are placed at repository root.
 
 Local `.env`, private keys/certificates, credential/secret JSON files, virtual environments, caches,
-`node_modules`, and `.git` content are excluded. `.env.example` remains publishable.
+package caches, and `.git` content are excluded. `.env.example` remains publishable.
 
 ## Monitoring
 

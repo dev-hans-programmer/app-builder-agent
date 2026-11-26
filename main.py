@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""
-Dual-Stack Backend Builder Agent
-
-Generates backend applications in both Python (FastAPI) and Node.js (Express)
-from a single prompt, then provides intelligent comparison.
-"""
+"""Python Project Builder Agent CLI."""
 
 from __future__ import annotations
 
@@ -36,22 +31,12 @@ load_dotenv()
 # Create Rich console
 console = Console()
 INCOMPLETE_JOB_STATUSES = {"initialized", "running", "paused", "blocked"}
-STACK_CHOICES = ("python", "nodejs", "both")
-
-
-def _requested_stacks(target_stack: str) -> tuple[str, ...]:
-    """Return the concrete builders selected for a target stack."""
-    if target_stack == "python":
-        return ("python",)
-    if target_stack == "nodejs":
-        return ("nodejs",)
-    return ("python", "nodejs")
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     """Parse CLI arguments for build, status, and resume flows."""
     parser = argparse.ArgumentParser(
-        description="Dual-Stack Backend Builder Agent",
+        description="Python Project Builder Agent",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -74,12 +59,6 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--no-clarification-gate",
         action="store_true",
         help="Disable the clarification pause and continue with assumptions.",
-    )
-    parser.add_argument(
-        "--stack",
-        choices=STACK_CHOICES,
-        default="both",
-        help="Generate Python, Node.js, or both implementations (default: both).",
     )
     return parser.parse_args(argv)
 
@@ -116,10 +95,10 @@ def display_banner():
     banner = """
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
-║   🤖  Dual-Stack Backend Builder Agent                      ║
+║   🤖  Python Project Builder Agent                          ║
 ║                                                              ║
-║   Generate Python (FastAPI) & Node.js (Express) backends    ║
-║   from a single prompt                                       ║
+║   Generate production-ready Python (FastAPI) projects       ║
+║   from a single prompt                                      ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 """
@@ -156,23 +135,14 @@ def get_user_input() -> tuple[str, str]:
     return user_prompt.strip(), project_name.strip()
 
 
-def display_phase1_start(target_stack: str = "both"):
+def display_phase1_start():
     """Display the gated generation pipeline header."""
-    selected = _requested_stacks(target_stack)
-    builder_lines = []
-    if "python" in selected:
-        builder_lines.append("• Building Python (FastAPI) backend")
-    if "nodejs" in selected:
-        builder_lines.append("• Building Node.js (Express) backend")
-    if len(selected) == 2:
-        builder_lines.append("• Running builders in parallel for maximum speed")
-    builder_lines.extend(
-        [
-            "• Approving acceptance criteria and architecture contracts",
-            "• Generating code through executable tasks",
-            "• Running quality, repair, and traceability gates",
-        ]
-    )
+    builder_lines = [
+        "• Building a Python (FastAPI) project",
+        "• Approving acceptance criteria and architecture contracts",
+        "• Generating code through executable tasks",
+        "• Running quality, repair, and traceability gates",
+    ]
 
     console.print()
     console.print("─" * 70, style="dim")
@@ -182,24 +152,6 @@ def display_phase1_start(target_stack: str = "both"):
             "[bold white]Phase 1: Code Generation — Gated Pipeline[/bold white]\n\n"
             + "\n".join(builder_lines),
             title="[bold cyan]🚀 Starting Build[/bold cyan]",
-            border_style="cyan",
-        )
-    )
-    console.print()
-
-
-def display_phase2_start():
-    """Display Phase 2 header."""
-    console.print()
-    console.print("─" * 70, style="dim")
-    console.print()
-    console.print(
-        Panel(
-            "[bold white]Phase 2: Analysis & Comparison[/bold white]\n\n"
-            "• Analyzing generated code\n"
-            "• Comparing implementations\n"
-            "• Generating detailed report",
-            title="[bold cyan]🔍 Comparison Agent[/bold cyan]",
             border_style="cyan",
         )
     )
@@ -232,8 +184,6 @@ def display_results(final_state: dict[str, Any]):
         return value if isinstance(value, (int, float)) else 0.0
 
     job_status = final_state.get("job_status", "")
-    target_stack = final_state.get("target_stack", "both")
-    selected_stacks = _requested_stacks(target_stack)
     quality_stacks = {
         str(item.get("stack")): item
         for item in (final_state.get("quality_results") or {}).get("stacks", [])
@@ -262,39 +212,13 @@ def display_results(final_state: dict[str, Any]):
         python_status_icon = "❌ Failed"
         python_status_style = "red"
 
-    if "python" in selected_stacks:
-        table.add_row(
-            "Python",
-            f"[{python_status_style}]{python_status_icon}[/{python_status_style}]",
-            f"{python_time:.2f}s",
-            str(python_files),
-            python_dir,
-        )
-
-    nodejs_output = final_state.get("nodejs_output", {}) or {}
-    nodejs_status = nodejs_output.get("status", "unknown")
-    nodejs_time = _safe_duration(final_state.get("nodejs_build_time"))
-    nodejs_files = nodejs_output.get("file_count", 0)
-    nodejs_dir = nodejs_output.get("output_dir", "N/A")
-
-    if _stack_succeeded("nodejs", nodejs_status):
-        nodejs_status_icon = "✅ Success"
-        nodejs_status_style = "green"
-    elif job_status == "paused" and not nodejs_output:
-        nodejs_status_icon = "⏸ Paused"
-        nodejs_status_style = "yellow"
-    else:
-        nodejs_status_icon = "❌ Failed"
-        nodejs_status_style = "red"
-
-    if "nodejs" in selected_stacks:
-        table.add_row(
-            "Node.js",
-            f"[{nodejs_status_style}]{nodejs_status_icon}[/{nodejs_status_style}]",
-            f"{nodejs_time:.2f}s",
-            str(nodejs_files),
-            nodejs_dir,
-        )
+    table.add_row(
+        "Python",
+        f"[{python_status_style}]{python_status_icon}[/{python_status_style}]",
+        f"{python_time:.2f}s",
+        str(python_files),
+        python_dir,
+    )
 
     console.print(table)
     console.print()
@@ -307,15 +231,6 @@ def display_results(final_state: dict[str, Any]):
                 title="[bold red]⚠️  Errors[/bold red]",
                 border_style="red",
             )
-        )
-        console.print()
-
-    if final_state.get("comparison_report"):
-        report_path = (final_state.get("artifacts") or {}).get(
-            "reports_dir", "./reports"
-        )
-        console.print(
-            f"[green]✓[/green] Comparison report saved to [cyan]{report_path}[/cyan]"
         )
         console.print()
 
@@ -364,8 +279,7 @@ def display_paused_job_notice(final_state: dict[str, Any]) -> None:
 
 
 def display_report_preview(report_path: Path):
-    """
-    Display a preview of the comparison report.
+    """Display a preview of a Markdown report.
 
     Args:
         report_path: Path to the markdown report file
@@ -499,7 +413,6 @@ def build_status_snapshot(
         "job_id": state.get("job_id", ""),
         "run_id": state.get("run_id", ""),
         "project_name": state.get("project_name", ""),
-        "target_stack": state.get("target_stack", "both"),
         "current_phase": state.get("current_phase", ""),
         "job_status": state.get("job_status", ""),
         "checkpoint_path": str(resolved_checkpoint),
@@ -535,7 +448,6 @@ def display_job_status(
     summary.add_row("Job ID", snapshot["job_id"] or "N/A")
     summary.add_row("Run ID", snapshot["run_id"] or "N/A")
     summary.add_row("Project", snapshot["project_name"] or "N/A")
-    summary.add_row("Target stack", snapshot["target_stack"])
     summary.add_row("Phase", snapshot["current_phase"] or "N/A")
     summary.add_row("Status", snapshot["job_status"] or "N/A")
     summary.add_row("Checkpoint", snapshot["checkpoint_path"] or "N/A")
@@ -638,7 +550,6 @@ def run_workflow_from_state(state: dict[str, Any]) -> dict[str, Any]:
 def _run_build_flow(
     *,
     clarification_gate_enabled: bool = True,
-    target_stack: str = "both",
 ) -> int:
     """Interactive build flow used for normal project creation."""
     display_banner()
@@ -654,13 +565,12 @@ def _run_build_flow(
         user_prompt=user_prompt,
         project_name=project_name,
         clarification_gate_enabled=clarification_gate_enabled,
-        target_stack=target_stack,
     )
 
     console.print("[dim]Initializing workflow...[/dim]")
     workflow = create_workflow()
 
-    display_phase1_start(target_stack)
+    display_phase1_start()
 
     start_time = time.time()
     console.print("[dim]Running workflow...[/dim]")
@@ -671,28 +581,13 @@ def _run_build_flow(
     display_results(final_state)
 
     python_time = final_state.get("python_build_time") or 0
-    nodejs_time = final_state.get("nodejs_build_time") or 0
-    selected_times = [
-        python_time if stack == "python" else nodejs_time
-        for stack in _requested_stacks(target_stack)
-    ]
-    slower_step = max(*selected_times, 0.000001)
-    efficiency = (slower_step / total_time * 100) if total_time else 0
-
-    timing_lines = []
-    if target_stack in {"python", "both"}:
-        timing_lines.append(f"[bold white]Python:[/bold white] {python_time:.2f}s")
-    if target_stack in {"nodejs", "both"}:
-        timing_lines.append(f"[bold white]Node.js:[/bold white] {nodejs_time:.2f}s")
-    efficiency_label = (
-        "Parallel efficiency" if target_stack == "both" else "Builder share of total"
-    )
+    builder_share = (python_time / total_time * 100) if total_time else 0
 
     console.print(
         Panel(
             f"[bold white]Total Time:[/bold white] {total_time:.2f}s\n"
-            + "\n".join(timing_lines)
-            + f"\n\n[dim]{efficiency_label}: {efficiency:.1f}%[/dim]",
+            f"[bold white]Python builder:[/bold white] {python_time:.2f}s\n\n"
+            f"[dim]Builder share of total: {builder_share:.1f}%[/dim]",
             title="[bold cyan]⏱️  Performance[/bold cyan]",
             border_style="cyan",
         )
@@ -700,15 +595,9 @@ def _run_build_flow(
     console.print()
 
     if final_state.get("job_status") == "completed":
-        output_lines = []
-        if target_stack in {"python", "both"}:
-            output_lines.append(
-                f"• [cyan]{(final_state.get('python_output') or {}).get('output_dir', 'N/A')}[/cyan]"
-            )
-        if target_stack in {"nodejs", "both"}:
-            output_lines.append(
-                f"• [cyan]{(final_state.get('nodejs_output') or {}).get('output_dir', 'N/A')}[/cyan]"
-            )
+        output_lines = [
+            f"• [cyan]{(final_state.get('python_output') or {}).get('output_dir', 'N/A')}[/cyan]"
+        ]
         quality_report = (final_state.get("quality_results") or {}).get("artifact_path")
         traceability_report = (final_state.get("traceability_result") or {}).get(
             "artifact_path"
@@ -799,27 +688,18 @@ def _run_resume_flow(checkpoint_arg: Any) -> int:
     state = load_state_from_checkpoint_path(checkpoint_path)
     final_state = run_workflow_from_state(state)
     display_results(final_state)
-    if final_state.get("comparison_report"):
-        report_dir = Path(
-            (final_state.get("artifacts") or {}).get("reports_dir", "./reports")
-        )
-        report_files = sorted(report_dir.glob("comparison-*.md"))
-        if report_files:
-            display_report_preview(report_files[-1])
     return 0
 
 
 def _run_auto_flow(
     *,
     clarification_gate_enabled: bool = True,
-    target_stack: str = "both",
 ) -> int:
     """Resume the latest incomplete job if one exists, otherwise start a new build."""
     checkpoint_path = find_latest_incomplete_checkpoint(".")
     if checkpoint_path is None:
         return _run_build_flow(
             clarification_gate_enabled=clarification_gate_enabled,
-            target_stack=target_stack,
         )
 
     display_banner()
@@ -833,14 +713,6 @@ def _run_auto_flow(
     state = load_state_from_checkpoint_path(checkpoint_path)
     final_state = run_workflow_from_state(state)
     display_results(final_state)
-    if final_state.get("comparison_report"):
-        report_dir = Path(
-            (final_state.get("artifacts") or {}).get("reports_dir", "./reports")
-        )
-        report_files = sorted(report_dir.glob("comparison-*.md"))
-        if report_files:
-            display_report_preview(report_files[-1])
-
     if final_state.get("job_status") == "paused":
         display_paused_job_notice(final_state)
     elif final_state.get("job_status") != "completed":
@@ -869,7 +741,6 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         return _run_build_flow(
             clarification_gate_enabled=not args.no_clarification_gate,
-            target_stack=getattr(args, "stack", "both"),
         )
 
     except KeyboardInterrupt:

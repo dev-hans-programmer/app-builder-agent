@@ -2,9 +2,9 @@
 Unit tests for Python builder agent.
 
 Tests cover:
-- parse_code_blocks(): Parsing Claude API responses
+- parse_code_blocks(): Parsing model responses
 - write_files(): Writing files to disk
-- create_python_prompt(): Generating prompts for Claude
+- create_python_prompt(): Generating Python builder prompts
 """
 
 from types import SimpleNamespace

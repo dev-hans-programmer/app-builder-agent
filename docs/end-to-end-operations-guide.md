@@ -234,7 +234,6 @@ curl -sS -X POST "http://127.0.0.1:8080/api/v1/projects/$PROJECT_ID/runs" \
   -H "Content-Type: application/json" \
   -d '{
     "request": "Build a production-grade Todo backend. Include user registration and login, secure JWT authentication, user profiles, and strict per-user data ownership. Implement create, update, delete, view, complete, and reopen operations for todos. A todo has title, description, Low/Medium/High priority, and an optional due date. Provide list, search, filter, sort, pagination, completed, pending, and overdue views. Include database migrations, validation, security, tests, linting, typing, and smoke checks.",
-    "target_stack": "python",
     "clarification_gate_enabled": false,
     "idempotency_key": "todo-initial-build-001"
   }' | tee /tmp/app-builder-run.json | jq
@@ -253,8 +252,7 @@ The idempotency key is unique within the project. Repeating the same key returns
 with HTTP 200 and does not create a fresh build. Change the key or use the retry endpoint when a new
 run is intended.
 
-`target_stack` can be `python`, `nodejs`, or `both`. Use one stack unless a comparison is actually
-needed; `both` performs both generations and their comparison.
+Every run generates Python/FastAPI. The run creation contract has no language-selection field.
 
 ## 6. Monitor the run through the API
 
@@ -357,8 +355,7 @@ data/projects/<project-uuid>/runs/<run-uuid>/
 ├── plans/
 ├── execution/
 ├── builds/
-│   ├── python/               # Generated FastAPI project
-│   └── nodejs/               # Generated Node.js project when selected
+│   └── python/               # Generated FastAPI project
 ├── verification/
 ├── repairs/
 ├── reports/

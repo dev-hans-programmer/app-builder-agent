@@ -26,7 +26,7 @@ def _events(state):
 def test_initial_state_creates_run_scoped_observability(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    state = create_initial_state("Build a todo API", "demo", target_stack="python")
+    state = create_initial_state("Build a todo API", "demo")
 
     run_dir = Path(state["artifacts"]["run_dir"])
     assert run_dir == tmp_path / "projects" / "demo" / "runs" / state["run_id"]
@@ -59,7 +59,6 @@ def test_single_stack_workflow_records_end_to_end_trace(tmp_path, monkeypatch):
     state = create_initial_state(
         "Build a secure API with authentication, a database, and deployment.",
         "observed-project",
-        target_stack="python",
     )
 
     final_state = create_workflow().invoke(state)
@@ -277,7 +276,7 @@ print(\"hello\")
         )
     )
     monkeypatch.setattr("src.agents.python_builder.OpenAI", lambda api_key: client)
-    state = create_initial_state("Build API", "model-project", target_stack="python")
+    state = create_initial_state("Build API", "model-project")
 
     result = instrument_node("python_builder", build_python, parent_step_id="repair")(
         state

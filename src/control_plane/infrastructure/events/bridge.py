@@ -24,11 +24,9 @@ WORKFLOW_STEPS = (
     "planning",
     "generation_start",
     "python_builder",
-    "nodejs_builder",
     "quality_gate",
     "targeted_repair",
     "traceability",
-    "comparison",
     "generate_report",
 )
 

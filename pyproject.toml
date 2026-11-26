@@ -1,7 +1,7 @@
 [project]
 name = "app-builder-agent"
 version = "0.1.0"
-description = "Dual-stack backend builder agent using LangGraph"
+description = "Python project builder agent using LangGraph"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,7 +9,6 @@ dependencies = [
     "langchain>=0.3.0",
     "langgraph>=0.2.0",
     "langgraph-checkpoint-postgres>=2.0.0",
-    "anthropic>=0.39.0",
     "asyncpg>=0.30.0",
     "celery>=5.5.0",
     "fastapi>=0.115.0",
