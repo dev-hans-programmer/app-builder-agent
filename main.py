@@ -9,6 +9,7 @@ from a single prompt, then provides intelligent comparison.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -291,7 +292,9 @@ def display_results(final_state: dict[str, Any]):
         console.print()
 
     if final_state.get("comparison_report"):
-        report_path = (final_state.get("artifacts") or {}).get("reports_dir", "./reports")
+        report_path = (final_state.get("artifacts") or {}).get(
+            "reports_dir", "./reports"
+        )
         console.print(
             f"[green]✓[/green] Comparison report saved to [cyan]{report_path}[/cyan]"
         )
@@ -315,16 +318,22 @@ def display_paused_job_notice(final_state: dict[str, Any]) -> None:
         details.extend(["", "Open questions:"])
         details.extend(f"• {question}" for question in open_questions)
     if clarification_request:
-        details.extend(["", f"Clarification request: [cyan]{clarification_request}[/cyan]"])
+        details.extend(
+            ["", f"Clarification request: [cyan]{clarification_request}[/cyan]"]
+        )
     if clarification_response:
-        details.extend(["Clarification response: [cyan]{0}[/cyan]".format(clarification_response)])
+        details.extend(
+            ["Clarification response: [cyan]{0}[/cyan]".format(clarification_response)]
+        )
     checkpoint_path = final_state.get("checkpoint_path")
     if checkpoint_path:
         details.extend(["", f"Checkpoint: [cyan]{checkpoint_path}[/cyan]"])
-    details.extend([
-        "",
-        "Run [cyan]uv run python main.py[/cyan] again to continue this job.",
-    ])
+    details.extend(
+        [
+            "",
+            "Run [cyan]uv run python main.py[/cyan] again to continue this job.",
+        ]
+    )
 
     console.print(
         Panel(
@@ -462,9 +471,14 @@ def build_status_snapshot(
 ) -> dict[str, Any]:
     """Create a normalized status snapshot for CLI output."""
     artifacts = state.get("artifacts") or {}
-    resolved_checkpoint = checkpoint_path or state.get("checkpoint_path") or state.get("checkpoint_ref", "")
+    resolved_checkpoint = (
+        checkpoint_path
+        or state.get("checkpoint_path")
+        or state.get("checkpoint_ref", "")
+    )
     return {
         "job_id": state.get("job_id", ""),
+        "run_id": state.get("run_id", ""),
         "project_name": state.get("project_name", ""),
         "target_stack": state.get("target_stack", "both"),
         "current_phase": state.get("current_phase", ""),
@@ -480,6 +494,11 @@ def build_status_snapshot(
         "repairs_dir": artifacts.get("repairs_dir", ""),
         "reports_dir": artifacts.get("reports_dir", ""),
         "checkpoints_dir": artifacts.get("checkpoints_dir", ""),
+        "run_dir": artifacts.get("run_dir", ""),
+        "run_report_path": artifacts.get("run_report_path", ""),
+        "timeline_path": artifacts.get("timeline_path", ""),
+        "events_path": artifacts.get("events_path", ""),
+        "run_summary_path": artifacts.get("run_summary_path", ""),
     }
 
 
@@ -495,6 +514,7 @@ def display_job_status(
     summary.add_column("Field", style="cyan", no_wrap=True)
     summary.add_column("Value", style="white")
     summary.add_row("Job ID", snapshot["job_id"] or "N/A")
+    summary.add_row("Run ID", snapshot["run_id"] or "N/A")
     summary.add_row("Project", snapshot["project_name"] or "N/A")
     summary.add_row("Target stack", snapshot["target_stack"])
     summary.add_row("Phase", snapshot["current_phase"] or "N/A")
@@ -522,10 +542,66 @@ def display_job_status(
         ("Repairs", "repairs_dir"),
         ("Reports", "reports_dir"),
         ("Checkpoints", "checkpoints_dir"),
+        ("Run", "run_dir"),
+        ("Run report", "run_report_path"),
+        ("Timeline", "timeline_path"),
+        ("Events", "events_path"),
+        ("Machine summary", "run_summary_path"),
     ):
         if snapshot[key]:
             paths.add_row(label, snapshot[key])
     console.print(paths)
+
+    summary_path = Path(snapshot["run_summary_path"])
+    if summary_path.is_file():
+        try:
+            run_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            run_summary = {}
+        if run_summary:
+            observability = Table(show_header=False, box=None, pad_edge=False)
+            observability.add_column("Metric", style="cyan", no_wrap=True)
+            observability.add_column("Value", style="white")
+            observability.add_row("Events", str(run_summary.get("event_count", 0)))
+            observability.add_row(
+                "Step attempts", str(run_summary.get("step_attempts", 0))
+            )
+            observability.add_row(
+                "Tokens",
+                str(
+                    int(run_summary.get("input_tokens", 0))
+                    + int(run_summary.get("output_tokens", 0))
+                ),
+            )
+            observability.add_row(
+                "Estimated cost",
+                (
+                    str(run_summary["estimated_cost"])
+                    if run_summary.get("estimated_cost") is not None
+                    else "n/a"
+                ),
+            )
+            console.print(
+                Panel(
+                    observability,
+                    title="[bold cyan]Run Observability[/bold cyan]",
+                    border_style="cyan",
+                )
+            )
+
+            action_items = list(run_summary.get("action_items") or [])
+            if action_items:
+                actions = Table(title="[bold yellow]Action Items[/bold yellow]")
+                actions.add_column("Step", style="cyan")
+                actions.add_column("Status")
+                actions.add_column("Suggested fix")
+                for item in action_items:
+                    actions.add_row(
+                        str(item.get("step_id", "")),
+                        str(item.get("status", "")),
+                        str(item.get("suggested_fix", "")),
+                    )
+                console.print(actions)
 
 
 def run_workflow_from_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -589,7 +665,9 @@ def _run_build_flow(
         timing_lines.append(f"[bold white]Python:[/bold white] {python_time:.2f}s")
     if target_stack in {"nodejs", "both"}:
         timing_lines.append(f"[bold white]Node.js:[/bold white] {nodejs_time:.2f}s")
-    efficiency_label = "Parallel efficiency" if target_stack == "both" else "Builder share of total"
+    efficiency_label = (
+        "Parallel efficiency" if target_stack == "both" else "Builder share of total"
+    )
 
     console.print(
         Panel(
@@ -615,9 +693,7 @@ def _run_build_flow(
         console.print(
             Panel(
                 "[bold green]✨ Build complete![/bold green]\n\n"
-                "Your backend is ready in:\n"
-                + "\n".join(output_lines)
-                + "\n\n"
+                "Your backend is ready in:\n" + "\n".join(output_lines) + "\n\n"
                 "[dim]Next steps: Review the code, run the applications, and start building![/dim]",
                 title="[bold green]🎉 Success[/bold green]",
                 border_style="green",
@@ -636,7 +712,7 @@ def _run_build_flow(
             )
         )
         console.print()
-    return 0
+    return 0 if final_state.get("job_status") in {"completed", "paused"} else 1
 
 
 def _run_status_flow(checkpoint_arg: Any) -> int:
@@ -684,7 +760,9 @@ def _run_resume_flow(checkpoint_arg: Any) -> int:
     final_state = run_workflow_from_state(state)
     display_results(final_state)
     if final_state.get("comparison_report"):
-        report_dir = Path((final_state.get("artifacts") or {}).get("reports_dir", "./reports"))
+        report_dir = Path(
+            (final_state.get("artifacts") or {}).get("reports_dir", "./reports")
+        )
         report_files = sorted(report_dir.glob("comparison-*.md"))
         if report_files:
             display_report_preview(report_files[-1])
@@ -716,7 +794,9 @@ def _run_auto_flow(
     final_state = run_workflow_from_state(state)
     display_results(final_state)
     if final_state.get("comparison_report"):
-        report_dir = Path((final_state.get("artifacts") or {}).get("reports_dir", "./reports"))
+        report_dir = Path(
+            (final_state.get("artifacts") or {}).get("reports_dir", "./reports")
+        )
         report_files = sorted(report_dir.glob("comparison-*.md"))
         if report_files:
             display_report_preview(report_files[-1])

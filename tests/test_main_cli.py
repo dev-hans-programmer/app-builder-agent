@@ -3,6 +3,7 @@ Tests for the CLI entrypoint.
 """
 
 from io import StringIO
+import json
 import runpy
 from types import SimpleNamespace
 
@@ -46,7 +47,9 @@ def test_check_environment_handles_missing_and_present_key(monkeypatch):
 
 def test_display_banner_and_phase_headers(monkeypatch):
     output = StringIO()
-    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=120))
+    monkeypatch.setattr(
+        cli, "console", Console(file=output, force_terminal=False, width=120)
+    )
 
     cli.display_banner()
     cli.display_phase1_start()
@@ -59,7 +62,9 @@ def test_display_banner_and_phase_headers(monkeypatch):
 
 
 def test_get_user_input_handles_success_and_validation(monkeypatch):
-    monkeypatch.setattr(cli.console, "input", lambda prompt: "Build API" if "What" in prompt else "demo")
+    monkeypatch.setattr(
+        cli.console, "input", lambda prompt: "Build API" if "What" in prompt else "demo"
+    )
     assert cli.get_user_input() == ("Build API", "demo")
 
     monkeypatch.setattr(cli.console, "input", lambda prompt: "   ")
@@ -85,7 +90,9 @@ def test_get_user_input_rejects_missing_project_name(monkeypatch):
 
 def test_display_results_and_report_preview(tmp_path, monkeypatch):
     output = StringIO()
-    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=140))
+    monkeypatch.setattr(
+        cli, "console", Console(file=output, force_terminal=False, width=140)
+    )
 
     final_state = {
         "python_output": {"status": "success", "file_count": 2, "output_dir": "py"},
@@ -118,7 +125,9 @@ def test_display_results_and_report_preview(tmp_path, monkeypatch):
 
 def test_display_results_handles_none_durations(monkeypatch):
     output = StringIO()
-    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=140))
+    monkeypatch.setattr(
+        cli, "console", Console(file=output, force_terminal=False, width=140)
+    )
 
     final_state = {
         "python_output": {"status": "success", "file_count": 2, "output_dir": "py"},
@@ -139,7 +148,9 @@ def test_build_status_snapshot_includes_artifact_paths(tmp_path):
     state = create_initial_state("Build API", "demo")
     state["artifacts"] = ensure_workspace_layout(tmp_path)
 
-    snapshot = cli.build_status_snapshot(state, checkpoint_path=tmp_path / "checkpoints" / "job.json")
+    snapshot = cli.build_status_snapshot(
+        state, checkpoint_path=tmp_path / "checkpoints" / "job.json"
+    )
 
     assert snapshot["checkpoint_path"].endswith("job.json")
     assert snapshot["requirements_dir"].endswith("requirements")
@@ -152,25 +163,41 @@ def test_resolve_checkpoint_path_supports_explicit_and_latest(tmp_path, monkeypa
     explicit = checkpoint_dir / "job-explicit.json"
     explicit.write_text("{}", encoding="utf-8")
 
-    assert cli.resolve_checkpoint_path(explicit, checkpoints_dir=checkpoint_dir) == explicit.resolve()
+    assert (
+        cli.resolve_checkpoint_path(explicit, checkpoints_dir=checkpoint_dir)
+        == explicit.resolve()
+    )
 
-    missing = cli.resolve_checkpoint_path("job-missing.json", checkpoints_dir=checkpoint_dir)
+    missing = cli.resolve_checkpoint_path(
+        "job-missing.json", checkpoints_dir=checkpoint_dir
+    )
     assert missing == (checkpoint_dir / "job-missing.json").resolve()
 
     fallback = checkpoint_dir / "job-fallback.json"
     fallback.write_text("{}", encoding="utf-8")
-    assert cli.resolve_checkpoint_path("job-fallback.json", checkpoints_dir=checkpoint_dir) == fallback.resolve()
+    assert (
+        cli.resolve_checkpoint_path("job-fallback.json", checkpoints_dir=checkpoint_dir)
+        == fallback.resolve()
+    )
 
     latest = checkpoint_dir / "job-latest.json"
     latest.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(cli, "find_latest_checkpoint", lambda directory: latest)
 
-    assert cli.resolve_checkpoint_path(None, checkpoints_dir=checkpoint_dir) == latest.resolve()
-    assert cli.resolve_checkpoint_path(True, checkpoints_dir=checkpoint_dir) == latest.resolve()
+    assert (
+        cli.resolve_checkpoint_path(None, checkpoints_dir=checkpoint_dir)
+        == latest.resolve()
+    )
+    assert (
+        cli.resolve_checkpoint_path(True, checkpoints_dir=checkpoint_dir)
+        == latest.resolve()
+    )
 
 
 def test_resolve_checkpoint_path_searches_project_workspaces(tmp_path, monkeypatch):
-    project_checkpoint = tmp_path / "projects" / "basic-todo" / "checkpoints" / "job-1.json"
+    project_checkpoint = (
+        tmp_path / "projects" / "basic-todo" / "checkpoints" / "job-1.json"
+    )
     project_checkpoint.parent.mkdir(parents=True)
     project_checkpoint.write_text("{}", encoding="utf-8")
 
@@ -180,7 +207,9 @@ def test_resolve_checkpoint_path_searches_project_workspaces(tmp_path, monkeypat
 
 
 def test_resolve_checkpoint_path_accepts_project_name(tmp_path, monkeypatch):
-    project_checkpoint = tmp_path / "projects" / "error-handler" / "checkpoints" / "job-2.json"
+    project_checkpoint = (
+        tmp_path / "projects" / "error-handler" / "checkpoints" / "job-2.json"
+    )
     project_checkpoint.parent.mkdir(parents=True)
     project_checkpoint.write_text("{}", encoding="utf-8")
 
@@ -196,7 +225,9 @@ def test_run_status_flow_uses_latest_checkpoint(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cli, "resolve_checkpoint_path", lambda arg: checkpoint_path)
     monkeypatch.setattr(cli, "display_job_status", lambda *args, **kwargs: None)
-    monkeypatch.setattr(cli, "load_state_from_checkpoint_path", lambda path: {"job_id": "job-1"})
+    monkeypatch.setattr(
+        cli, "load_state_from_checkpoint_path", lambda path: {"job_id": "job-1"}
+    )
 
     assert cli._run_status_flow(True) == 0
 
@@ -242,15 +273,41 @@ def test_load_state_from_checkpoint_path_round_trip(tmp_path):
 
 def test_display_job_status_renders_summary(tmp_path, monkeypatch):
     output = StringIO()
-    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=120))
+    monkeypatch.setattr(
+        cli, "console", Console(file=output, force_terminal=False, width=120)
+    )
     state = create_initial_state("Build API", "demo")
     state["artifacts"] = ensure_workspace_layout(tmp_path)
+    run_summary_path = tmp_path / "run-summary.json"
+    run_summary_path.write_text(
+        json.dumps(
+            {
+                "event_count": 4,
+                "step_attempts": 1,
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "estimated_cost": 0.01,
+                "action_items": [
+                    {
+                        "step_id": "python_builder",
+                        "status": "failed",
+                        "suggested_fix": "Retry the builder.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    state["artifacts"]["run_summary_path"] = str(run_summary_path)
 
     cli.display_job_status(state, checkpoint_path=tmp_path / "checkpoints" / "job.json")
 
     text = output.getvalue()
     assert "Job Status" in text
     assert "Artifact Paths" in text
+    assert "Run Observability" in text
+    assert "Action Items" in text
+    assert "Retry the builder" in text
 
 
 def test_run_workflow_from_state_uses_fake_workflow(monkeypatch):
@@ -312,7 +369,9 @@ def test_run_resume_flow_invokes_workflow(tmp_path, monkeypatch):
     final_state["nodejs_output"] = {"status": "success", "output_dir": "node"}
 
     monkeypatch.setattr(cli, "resolve_checkpoint_path", lambda arg: checkpoint_path)
-    monkeypatch.setattr(cli, "load_state_from_checkpoint_path", lambda path: {"job_id": "job-1"})
+    monkeypatch.setattr(
+        cli, "load_state_from_checkpoint_path", lambda path: {"job_id": "job-1"}
+    )
     monkeypatch.setattr(cli, "run_workflow_from_state", lambda state: final_state)
     monkeypatch.setattr(cli, "display_results", lambda state: None)
     monkeypatch.setattr(cli, "display_report_preview", lambda path: None)
@@ -330,6 +389,7 @@ def test_run_resume_flow_reports_missing_checkpoint(monkeypatch):
 
 def test_run_build_flow_uses_workflow(monkeypatch):
     final_state = create_initial_state("Build API", "demo")
+    final_state["job_status"] = "completed"
     final_state["comparison_report"] = "# Comparison Report"
     final_state["python_output"] = {"status": "success", "output_dir": "python"}
     final_state["nodejs_output"] = {"status": "success", "output_dir": "node"}
@@ -380,7 +440,7 @@ def test_run_build_flow_handles_none_outputs(monkeypatch):
     monkeypatch.setattr(cli, "display_results", lambda state: None)
     monkeypatch.setattr(cli.console, "print", lambda *args, **kwargs: None)
 
-    assert cli._run_build_flow() == 0
+    assert cli._run_build_flow() == 1
 
 
 def test_run_build_flow_shows_paused_notice(monkeypatch):
@@ -411,7 +471,9 @@ def test_run_build_flow_shows_paused_notice(monkeypatch):
     monkeypatch.setattr(cli, "create_workflow", lambda: fake_workflow)
     monkeypatch.setattr(cli, "display_phase1_start", lambda target_stack="both": None)
     monkeypatch.setattr(cli, "display_results", lambda state: None)
-    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=140))
+    monkeypatch.setattr(
+        cli, "console", Console(file=output, force_terminal=False, width=140)
+    )
 
     assert cli._run_build_flow() == 0
     text = output.getvalue()
@@ -420,7 +482,9 @@ def test_run_build_flow_shows_paused_notice(monkeypatch):
 
 
 def test_run_build_flow_can_disable_clarification_gate(monkeypatch):
-    final_state = create_initial_state("Build API", "demo", clarification_gate_enabled=False)
+    final_state = create_initial_state(
+        "Build API", "demo", clarification_gate_enabled=False
+    )
     final_state["job_status"] = "completed"
     fake_workflow = FakeWorkflow(final_state)
 
@@ -428,11 +492,22 @@ def test_run_build_flow_can_disable_clarification_gate(monkeypatch):
     monkeypatch.setattr(cli, "display_banner", lambda: None)
     monkeypatch.setattr(cli, "check_environment", lambda: True)
     monkeypatch.setattr(cli, "get_user_input", lambda: ("Build API", "demo"))
-    monkeypatch.setattr(cli, "create_initial_state", lambda user_prompt, project_name, clarification_gate_enabled=True, target_stack="both": create_initial_state(user_prompt, project_name, clarification_gate_enabled=clarification_gate_enabled, target_stack=target_stack))
+    monkeypatch.setattr(
+        cli,
+        "create_initial_state",
+        lambda user_prompt, project_name, clarification_gate_enabled=True, target_stack="both": create_initial_state(
+            user_prompt,
+            project_name,
+            clarification_gate_enabled=clarification_gate_enabled,
+            target_stack=target_stack,
+        ),
+    )
     monkeypatch.setattr(cli, "create_workflow", lambda: fake_workflow)
     monkeypatch.setattr(cli, "display_phase1_start", lambda target_stack="both": None)
     monkeypatch.setattr(cli, "display_results", lambda state: None)
-    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=140))
+    monkeypatch.setattr(
+        cli, "console", Console(file=output, force_terminal=False, width=140)
+    )
 
     assert cli._run_build_flow(clarification_gate_enabled=False) == 0
     assert fake_workflow.initial_state["clarification_gate_enabled"] is False
@@ -446,21 +521,39 @@ def test_run_build_flow_stops_when_environment_missing(monkeypatch):
 
 
 def test_main_status_branch(monkeypatch):
-    monkeypatch.setattr(cli, "parse_args", lambda argv=None: SimpleNamespace(status=True, resume=None, no_clarification_gate=False))
+    monkeypatch.setattr(
+        cli,
+        "parse_args",
+        lambda argv=None: SimpleNamespace(
+            status=True, resume=None, no_clarification_gate=False
+        ),
+    )
     monkeypatch.setattr(cli, "_run_status_flow", lambda arg: 0)
 
     assert cli.main(["--status"]) == 0
 
 
 def test_main_resume_branch(monkeypatch):
-    monkeypatch.setattr(cli, "parse_args", lambda argv=None: SimpleNamespace(status=None, resume=True, no_clarification_gate=False))
+    monkeypatch.setattr(
+        cli,
+        "parse_args",
+        lambda argv=None: SimpleNamespace(
+            status=None, resume=True, no_clarification_gate=False
+        ),
+    )
     monkeypatch.setattr(cli, "_run_resume_flow", lambda arg: 0)
 
     assert cli.main(["--resume"]) == 0
 
 
 def test_main_build_branch(monkeypatch):
-    monkeypatch.setattr(cli, "parse_args", lambda argv=None: SimpleNamespace(status=None, resume=None, no_clarification_gate=False, stack="python"))
+    monkeypatch.setattr(
+        cli,
+        "parse_args",
+        lambda argv=None: SimpleNamespace(
+            status=None, resume=None, no_clarification_gate=False, stack="python"
+        ),
+    )
     captured = {}
     monkeypatch.setattr(
         cli,
@@ -468,7 +561,8 @@ def test_main_build_branch(monkeypatch):
         lambda *, clarification_gate_enabled=True, target_stack="both": captured.update(
             clarification_gate_enabled=clarification_gate_enabled,
             target_stack=target_stack,
-        ) or 0,
+        )
+        or 0,
     )
 
     assert cli.main([]) == 0
@@ -521,12 +615,16 @@ def test_auto_flow_resumes_latest_incomplete_checkpoint(tmp_path, monkeypatch):
 
 
 def test_main_keyboard_interrupt_branch(monkeypatch):
-    monkeypatch.setattr(cli, "parse_args", lambda argv=None: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(
+        cli, "parse_args", lambda argv=None: (_ for _ in ()).throw(KeyboardInterrupt())
+    )
 
     assert cli.main([]) == 130
 
 
 def test_main_generic_error_branch(monkeypatch):
-    monkeypatch.setattr(cli, "parse_args", lambda argv=None: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        cli, "parse_args", lambda argv=None: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
 
     assert cli.main([]) == 1

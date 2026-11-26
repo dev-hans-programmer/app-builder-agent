@@ -112,7 +112,7 @@ def execute_spec(state: BuilderState) -> Dict[str, Any]:
         return {
             "job_status": "failed",
             "current_phase": "execution",
-            "errors": state.get("errors", []) + ["Execution plan is empty"],
+            "errors": ["Execution plan is empty"],
         }
 
     current_spec_id = state.get("current_spec_id") or ordered_specs[0]
@@ -121,7 +121,7 @@ def execute_spec(state: BuilderState) -> Dict[str, Any]:
         return {
             "job_status": "failed",
             "current_phase": "execution",
-            "errors": state.get("errors", []) + [f"Spec {current_spec_id} not found in spec tree"],
+            "errors": [f"Spec {current_spec_id} not found in spec tree"],
         }
 
     workspace_root = manifest["workspace_root"]
@@ -162,7 +162,7 @@ def execute_spec(state: BuilderState) -> Dict[str, Any]:
             "",
             f"**Job**: {state['job_id']}",
             f"**Current Spec**: {current_spec_id}",
-            f"**Phase**: execution",
+            "**Phase**: execution",
             "",
             "## Files Written",
             f"- {execution_dir / spec_slug / 'summary.json'}",

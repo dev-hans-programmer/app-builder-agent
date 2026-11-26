@@ -83,6 +83,7 @@ class TestClarificationGate:
         state = create_initial_state("Build an API", "demo project")
         state["artifacts"] = ensure_workspace_layout(tmp_path)
         state["requirements"] = build_requirement_artifact("Build an API", "demo")
+        state["requirements"]["open_questions"] = ["Which database should be used?"]
         monkeypatch.setattr(
             "src.agents.clarification_gate.console.input",
             lambda prompt: "PostgreSQL" if "database" in prompt.lower() else "Yes",
@@ -109,6 +110,7 @@ class TestClarificationGate:
         state = create_initial_state("Build an API", "demo project")
         state["artifacts"] = ensure_workspace_layout(tmp_path)
         requirements = build_requirement_artifact("Build an API", "demo")
+        requirements["open_questions"] = ["Which database should be used?"]
         state["requirements"] = requirements
 
         clarification_path = Path(state["artifacts"]["requirements_dir"]) / "clarification.json"
@@ -139,6 +141,7 @@ class TestClarificationGate:
         state = create_initial_state("Build an API", "demo project")
         state["artifacts"] = ensure_workspace_layout(tmp_path)
         state["requirements"] = build_requirement_artifact("Build an API", "demo")
+        state["requirements"]["open_questions"] = ["Which database should be used?"]
         monkeypatch.setattr(
             "src.agents.clarification_gate.console.input",
             lambda prompt: "PostgreSQL" if "database" in prompt.lower() else "",

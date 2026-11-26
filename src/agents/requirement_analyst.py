@@ -195,47 +195,14 @@ def _build_target_users(text: str) -> list[str]:
     return users
 
 
-def _build_success_criteria(functional_requirements: list[str], complexity: str) -> list[str]:
+def _build_success_criteria(functional_requirements: list[str]) -> list[str]:
     criteria = [
         "The generated solution covers the documented functional requirements.",
         "The artifact set is sufficient to plan implementation without losing context.",
     ]
-    if complexity != "simple":
-        criteria.append("Clarification questions are resolved before architecture planning continues.")
     if len(functional_requirements) > 1:
         criteria.append("The PRD remains readable and organized even when multiple capabilities are requested.")
     return criteria
-
-
-def _build_open_questions(text: str) -> list[str]:
-    lowered = text.lower()
-    questions = []
-    if _contains_any(lowered, ("in-memory", "in memory", "inmememory", "ephemeral", "volatile")):
-        questions.append("Should this in-memory data reset on every restart, or should we persist it later?")
-    elif not _contains_any(lowered, ("database", "storage", "persist", "persistence")):
-        questions.append("Do you want this data to remain in-memory, or should we use a persistence layer?")
-
-    if _contains_any(lowered, ("link", "linked", "associate", "relationship", "belongs to", "belongs", "parent", "child")) or (
-        "user" in lowered and _contains_any(lowered, ("post", "comment", "task", "project", "order", "item"))
-    ):
-        if "user" in lowered and "post" in lowered:
-            questions.append("Should posts attach to an existing userId, and what should happen if that user is deleted?")
-        else:
-            questions.append("What is the ownership or cardinality rule between the linked resources?")
-
-    if not _contains_any(lowered, ("auth", "authentication", "authorization", "login")):
-        questions.append("Should this API require authentication or authorization?")
-
-    if not _contains_any(lowered, ("deploy", "deployment", "hosting", "production")):
-        questions.append("Where should this service be deployed, and are there environment constraints?")
-
-    if (
-        not questions
-        and classify_complexity(text, _extract_functional_requirements(text)) == "complex"
-        and _contains_any(lowered, ("production", "scale", "reliable", "observability", "logging", "monitor"))
-    ):
-        questions.append("Do you want observability hooks such as logging, metrics, or tracing from day one?")
-    return questions
 
 
 def _render_bullets(items: list[str]) -> list[str]:
@@ -266,7 +233,9 @@ def build_requirement_artifact(
         non_functional_requirements=non_functional_requirements,
         constraints=_extract_constraints(raw_request),
         assumptions=_build_assumptions(raw_request),
-        open_questions=_build_open_questions(raw_request),
+        # Automatic clarification questions are intentionally disabled. The
+        # generic questions did not add enough context to improve generation.
+        open_questions=[],
         out_of_scope=[],
         complexity=complexity,
         created_at="",
@@ -321,8 +290,7 @@ def render_requirements_markdown(requirements: RequirementArtifact) -> str:
         "## Success Criteria",
         *_render_bullets(
             _build_success_criteria(
-                list(requirements.get("functional_requirements", [])),
-                str(requirements.get("complexity", "simple")),
+                list(requirements.get("functional_requirements", []))
             )
         ),
         "",

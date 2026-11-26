@@ -8,6 +8,7 @@ and end-to-end workflow execution.
 import json
 import pytest
 from pathlib import Path
+from langgraph.graph import END, StateGraph
 from src.graph import (
     BuilderState,
     create_initial_state,
@@ -150,6 +151,32 @@ class TestGenerateReportNode:
         assert result is not None
         assert result["delivery_summary_markdown"]
         assert not list(Path(result["artifacts"]["reports_dir"]).glob("comparison-*.md"))
+
+    def test_preserves_builder_failure_as_terminal_status(self, tmp_path):
+        state = create_initial_state(
+            "Build API",
+            "failed-build",
+            target_stack="python",
+        )
+        state["artifacts"] = ensure_workspace_layout(tmp_path)
+        state["python_output"] = {
+            "status": "failed",
+            "error": "Unsupported model parameter",
+        }
+        state["errors"] = ["Python builder failed: Unsupported model parameter"]
+
+        graph = StateGraph(BuilderState)
+        graph.add_node("generate_report", generate_report_node)
+        graph.set_entry_point("generate_report")
+        graph.add_edge("generate_report", END)
+
+        result = graph.compile().invoke(state)
+
+        assert result["job_status"] == "failed"
+        assert result["current_phase"] == "completed"
+        assert result["errors"] == [
+            "Python builder failed: Unsupported model parameter"
+        ]
 
 
 class TestCreateWorkflow:
@@ -301,18 +328,24 @@ class TestWorkflowExecution:
         assert final_state["target_stack"] == target_stack
         assert final_state["job_status"] == "completed"
 
-    def test_workflow_prompts_for_clarification_and_continues(self, monkeypatch):
+    def test_workflow_does_not_generate_generic_clarification_questions(
+        self, monkeypatch
+    ):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         state = create_initial_state("Build API", "needs-clarification")
         monkeypatch.setattr(
             "src.agents.clarification_gate.console.input",
-            lambda prompt: "PostgreSQL" if "database" in prompt.lower() else "Yes",
+            lambda prompt: (_ for _ in ()).throw(
+                AssertionError("clarification prompt should not be shown")
+            ),
         )
         workflow = create_workflow()
 
         final_state = workflow.invoke(state)
 
         assert final_state["job_status"] == "completed"
+        assert final_state["requirements"]["open_questions"] == []
+        assert final_state["requirements"]["needs_clarification"] is False
 
     def test_workflow_skips_clarification_when_disabled(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -329,9 +362,11 @@ class TestWorkflowExecution:
         assert final_state["clarification_gate_enabled"] is False
         assert final_state["current_phase"] == "completed"
         assert final_state["spec_tree"] is not None
-        assert final_state["requirements"]["needs_clarification"] is True
+        assert final_state["requirements"]["needs_clarification"] is False
 
-    def test_workflow_resumes_after_clarification_answers(self, monkeypatch, tmp_path):
+    def test_workflow_ignores_stale_clarification_answers_without_questions(
+        self, monkeypatch, tmp_path
+    ):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         state = create_initial_state("Build API", "resume-project")
         requirements = build_requirement_artifact("Build API", "resume-project")
@@ -387,4 +422,5 @@ class TestWorkflowExecution:
         assert final_state["execution_trace"] is not None
         assert final_state["verification_results"] is not None
         assert final_state["repair_history"] is not None
-        assert final_state["requirements"]["clarification_answers"]
+        assert not final_state["requirements"].get("clarification_answers")
+        assert final_state["requirements"]["open_questions"] == []

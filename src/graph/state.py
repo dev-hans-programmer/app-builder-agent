@@ -15,7 +15,6 @@ import os
 from src.graph.runtime import (
     ArtifactManifest,
     JobMetadata,
-    create_artifact_manifest,
     create_job_metadata,
     ensure_workspace_layout,
 )
@@ -89,6 +88,8 @@ class BuilderState(TypedDict):
 
         job_id (NotRequired[str]): Unique durable identifier for the workflow job.
 
+        run_id (NotRequired[str]): Run-scoped observability identifier.
+
         job_status (NotRequired[str]): Current lifecycle status of the job.
 
     current_phase (NotRequired[str]): Current workflow phase.
@@ -145,12 +146,15 @@ class BuilderState(TypedDict):
     python_output: Optional[Dict[str, Any]]
     nodejs_output: Optional[Dict[str, Any]]
     comparison_report: Optional[str]
+    comparison_metadata: NotRequired[Optional[Dict[str, Any]]]
     timestamp: str
     errors: Annotated[List[str], operator.add]
     python_build_time: Optional[float]
     nodejs_build_time: Optional[float]
     target_stack: NotRequired[Literal["python", "nodejs", "both"]]
     job_id: NotRequired[str]
+    run_id: NotRequired[str]
+    queue_job_id: NotRequired[str]
     job_status: NotRequired[str]
     current_phase: NotRequired[str]
     clarification_gate_enabled: NotRequired[bool]
@@ -162,6 +166,8 @@ class BuilderState(TypedDict):
     spec_tree: NotRequired[Dict[str, Any]]
     execution_plan: NotRequired[Dict[str, Any]]
     current_spec_id: NotRequired[Optional[str]]
+    current_task_id: NotRequired[Optional[str]]
+    acceptance_criterion_id: NotRequired[Optional[str]]
     completed_specs: NotRequired[List[str]]
     failed_specs: NotRequired[List[str]]
     execution_trace: NotRequired[List[Dict[str, Any]]]
@@ -218,10 +224,10 @@ def sanitize_project_name(name: str) -> str:
     name = name.replace(" ", "-")
 
     # Remove special characters (keep alphanumeric and hyphens)
-    name = re.sub(r'[^a-z0-9-]', '', name)
+    name = re.sub(r"[^a-z0-9-]", "", name)
 
     # Remove consecutive hyphens
-    name = re.sub(r'-+', '-', name)
+    name = re.sub(r"-+", "-", name)
 
     # Remove leading/trailing hyphens
     name = name.strip("-")
@@ -280,26 +286,35 @@ def create_initial_state(
 
     # Sanitize project name
     sanitized_name = sanitize_project_name(project_name)
-    ensure_workspace_layout(".", project_name=sanitized_name)
     job_metadata: JobMetadata = create_job_metadata(
         input_type="prompt",
         raw_request=user_prompt,
     )
-    artifact_manifest = create_artifact_manifest(".", project_name=sanitized_name)
-    gate_enabled = _clarification_gate_default() if clarification_gate_enabled is None else clarification_gate_enabled
+    artifact_manifest = ensure_workspace_layout(
+        ".",
+        project_name=sanitized_name,
+        run_id=job_metadata["run_id"],
+    )
+    gate_enabled = (
+        _clarification_gate_default()
+        if clarification_gate_enabled is None
+        else clarification_gate_enabled
+    )
 
-    return BuilderState(
+    state = BuilderState(
         user_prompt=user_prompt,
         project_name=sanitized_name,
         python_output=None,
         nodejs_output=None,
         comparison_report=None,
+        comparison_metadata=None,
         timestamp=datetime.now().isoformat(),
         errors=[],
         python_build_time=None,
         nodejs_build_time=None,
         target_stack=target_stack,
         job_id=job_metadata["job_id"],
+        run_id=job_metadata["run_id"],
         job_status=job_metadata["job_status"],
         current_phase=job_metadata["current_phase"],
         clarification_gate_enabled=gate_enabled,
@@ -321,6 +336,10 @@ def create_initial_state(
         created_at=job_metadata["created_at"],
         updated_at=job_metadata["updated_at"],
     )
+    from src.observability import initialize_run_observability
+
+    initialize_run_observability(state)
+    return state
 
 
 def validate_state(state: BuilderState) -> List[str]:
@@ -368,7 +387,7 @@ def validate_state(state: BuilderState) -> List[str]:
 
     # Validate project name format (should be lowercase alphanumeric with hyphens)
     if state.get("project_name"):
-        if not re.match(r'^[a-z0-9-]+$', state["project_name"]):
+        if not re.match(r"^[a-z0-9-]+$", state["project_name"]):
             errors.append(
                 "project_name must be lowercase alphanumeric with hyphens only"
             )
@@ -383,6 +402,9 @@ def validate_state(state: BuilderState) -> List[str]:
     # Validate durable job metadata when present
     if state.get("job_id") is not None and not state.get("job_id"):
         errors.append("job_id cannot be empty")
+
+    if state.get("run_id") is not None and not state.get("run_id"):
+        errors.append("run_id cannot be empty")
 
     if state.get("job_status") is not None and not state.get("job_status"):
         errors.append("job_status cannot be empty")
@@ -401,13 +423,19 @@ def validate_state(state: BuilderState) -> List[str]:
     if state.get("target_stack", "both") not in {"python", "nodejs", "both"}:
         errors.append("target_stack must be one of: python, nodejs, both")
 
-    if state.get("execution_plan") is not None and not isinstance(state["execution_plan"], dict):
+    if state.get("execution_plan") is not None and not isinstance(
+        state["execution_plan"], dict
+    ):
         errors.append("execution_plan must be a dictionary")
 
-    if state.get("execution_trace") is not None and not isinstance(state["execution_trace"], list):
+    if state.get("execution_trace") is not None and not isinstance(
+        state["execution_trace"], list
+    ):
         errors.append("execution_trace must be a list")
 
-    if state.get("checkpoint_path") is not None and not isinstance(state["checkpoint_path"], str):
+    if state.get("checkpoint_path") is not None and not isinstance(
+        state["checkpoint_path"], str
+    ):
         errors.append("checkpoint_path must be a string")
 
     return errors

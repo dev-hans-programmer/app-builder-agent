@@ -43,6 +43,7 @@ def build_delivery_summary(state: Dict[str, Any]) -> str:
         "# Delivery Summary",
         "",
         f"**Job ID**: {state.get('job_id', '')}",
+        f"**Run ID**: {state.get('run_id', '')}",
         f"**Project**: {state.get('project_name', '')}",
         f"**Target Stack**: {target_stack}",
         f"**Current Phase**: {state.get('current_phase', '')}",
@@ -77,6 +78,9 @@ def build_delivery_summary(state: Dict[str, Any]) -> str:
         f"- Repairs: {artifacts.get('repairs_dir', '')}",
         f"- Reports: {artifacts.get('reports_dir', '')}",
         f"- Checkpoints: {artifacts.get('checkpoints_dir', '')}",
+        f"- Run report: {artifacts.get('run_report_path', '')}",
+        f"- Run timeline: {artifacts.get('timeline_path', '')}",
+        f"- Machine events: {artifacts.get('events_path', '')}",
         "",
     ]
     return "\n".join(lines)

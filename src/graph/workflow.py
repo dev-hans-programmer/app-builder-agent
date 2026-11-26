@@ -9,6 +9,37 @@ spec decomposition, execution planning, and parallel build execution.
 from langgraph.graph import StateGraph, END
 from src.graph.state import BuilderState
 from src.graph.runtime import advance_job_phase
+from src.observability import instrument_node
+
+
+def _terminal_job_status(state: BuilderState) -> str:
+    """Derive the terminal status without hiding explicit step failures."""
+    current_status = state.get("job_status")
+    if current_status in {"failed", "blocked"}:
+        return current_status
+
+    target_stack = state.get("target_stack", "both")
+    selected_outputs = []
+    if target_stack in {"python", "both"}:
+        selected_outputs.append(state.get("python_output") or {})
+    if target_stack in {"nodejs", "both"}:
+        selected_outputs.append(state.get("nodejs_output") or {})
+
+    if any(output.get("status") == "failed" for output in selected_outputs):
+        return "failed"
+
+    comparison = state.get("comparison_metadata") or {}
+    builders_succeeded = selected_outputs and all(
+        output.get("status") == "success" for output in selected_outputs
+    )
+    if (
+        target_stack == "both"
+        and builders_succeeded
+        and comparison.get("status") == "failed"
+    ):
+        return "failed"
+
+    return "completed"
 
 
 def parse_input_node(state: BuilderState) -> BuilderState:
@@ -68,7 +99,10 @@ def generate_report_node(state: BuilderState) -> BuilderState:
     """
     from pathlib import Path
     from src.graph.runtime import ensure_workspace_layout
-    from src.agents.final_reporter import build_delivery_summary, persist_delivery_summary
+    from src.agents.final_reporter import (
+        build_delivery_summary,
+        persist_delivery_summary,
+    )
 
     manifest = state.get("artifacts") or ensure_workspace_layout(
         ".",
@@ -78,6 +112,13 @@ def generate_report_node(state: BuilderState) -> BuilderState:
     reports_dir = Path(manifest["reports_dir"])
     reports_dir.mkdir(parents=True, exist_ok=True)
 
+    # Finalize state before persisting delivery artifacts so checkpoints and
+    # summaries reflect the terminal status rather than the preceding phase.
+    state = advance_job_phase(
+        state,
+        "completed",
+        status=_terminal_job_status(state),
+    )
     delivery_summary = build_delivery_summary(state)
     comparison_report = state.get("comparison_report")
     if comparison_report:
@@ -91,13 +132,16 @@ def generate_report_node(state: BuilderState) -> BuilderState:
     state["artifacts"] = state.get("artifacts", {})
     state["artifacts"].update(summary_paths)
 
-    # Finalize job metadata for the current workflow
-    state = advance_job_phase(state, "completed", status="completed")
-    state["job_status"] = "completed"
-    state["current_phase"] = "completed"
-    state.update(summary_paths)
-
-    return state
+    # LangGraph applies an append reducer to `errors`. Returning the full state
+    # here would append all existing errors a second time, so report only the
+    # fields finalized by this node.
+    return {
+        "artifacts": state["artifacts"],
+        "current_phase": state["current_phase"],
+        "job_status": state["job_status"],
+        "updated_at": state["updated_at"],
+        **summary_paths,
+    }
 
 
 def _route_after_requirement_analysis(state: BuilderState) -> str:
@@ -262,20 +306,28 @@ def create_workflow() -> StateGraph:
     # Create graph with BuilderState
     workflow = StateGraph(BuilderState)
 
-    # Add nodes
-    workflow.add_node("parse_input", parse_input_node)
-    workflow.add_node("requirement_analysis", analyze_requirements)
-    workflow.add_node("clarification_gate", clarify_requirements)
-    workflow.add_node("architecture_planning", analyze_architecture)
-    workflow.add_node("spec_decomposition", generate_specs)
-    workflow.add_node("planning", plan_execution)
-    workflow.add_node("execution_engine", execute_spec)
-    workflow.add_node("verification", verify_execution)
-    workflow.add_node("repair", repair_execution)
-    workflow.add_node("python_builder", python_builder_build)
-    workflow.add_node("nodejs_builder", nodejs_builder_build)
-    workflow.add_node("comparison", comparison_agent)
-    workflow.add_node("generate_report", generate_report_node)
+    # Add instrumented nodes. Parent ids describe the logical workflow even
+    # when a conditional edge skips a node or fans out both builders.
+    nodes = {
+        "parse_input": (parse_input_node, "workflow"),
+        "requirement_analysis": (analyze_requirements, "parse_input"),
+        "clarification_gate": (clarify_requirements, "requirement_analysis"),
+        "architecture_planning": (analyze_architecture, "requirement_analysis"),
+        "spec_decomposition": (generate_specs, "architecture_planning"),
+        "planning": (plan_execution, "spec_decomposition"),
+        "execution_engine": (execute_spec, "planning"),
+        "verification": (verify_execution, "execution_engine"),
+        "repair": (repair_execution, "verification"),
+        "python_builder": (python_builder_build, "repair"),
+        "nodejs_builder": (nodejs_builder_build, "repair"),
+        "comparison": (comparison_agent, "python_builder+nodejs_builder"),
+        "generate_report": (generate_report_node, "comparison-or-builder"),
+    }
+    for node_name, (node, parent_step_id) in nodes.items():
+        workflow.add_node(
+            node_name,
+            instrument_node(node_name, node, parent_step_id=parent_step_id),
+        )
 
     # Set entry point
     workflow.set_entry_point("parse_input")

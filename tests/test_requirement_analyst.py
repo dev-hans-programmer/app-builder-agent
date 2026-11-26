@@ -57,7 +57,7 @@ class TestRequirementArtifact:
         assert artifact["functional_requirements"]
         assert "security" in artifact["non_functional_requirements"]
         assert artifact["assumptions"]
-        assert artifact["open_questions"]
+        assert artifact["open_questions"] == []
         assert artifact["complexity"] in {"simple", "medium", "complex"}
 
     def test_render_requirements_markdown(self):
@@ -135,5 +135,5 @@ class TestAnalyzeRequirements:
         assert result["job_status"] == "running"
         assert result["current_phase"] == "requirement_analysis"
         assert result["input_type"] in {"prompt", "brief", "prd", "feature_list"}
-        assert result["requirements"]["needs_clarification"] in {True, False}
+        assert result["requirements"]["needs_clarification"] is False
         assert Path(result["requirements"]["artifact_paths"]["requirements_json"]).exists()

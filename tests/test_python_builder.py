@@ -7,9 +7,12 @@ Tests cover:
 - create_python_prompt(): Generating prompts for Claude
 """
 
-import pytest
-from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from src.agents import python_builder
 from src.agents.python_builder import parse_code_blocks, write_files
+from src.graph import create_initial_state, ensure_workspace_layout
 from src.prompts.python_builder_prompt import create_python_prompt
 
 
@@ -228,6 +231,61 @@ class TestWriteFiles:
 
         # File should be overwritten
         assert filepath.read_text() == "new content"
+
+
+class TestPythonBuilderModelRequest:
+    def test_uses_max_completion_tokens(self, monkeypatch, tmp_path):
+        response = SimpleNamespace(
+            id="chatcmpl-test",
+            model="test-sol-model",
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="```filename: main.py\nprint('generated')\n```"
+                    )
+                )
+            ],
+            usage=None,
+        )
+        create = MagicMock(return_value=response)
+        client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_MODEL", "gpt-6.2-sol")
+        monkeypatch.setenv("OPENAI_MAX_COMPLETION_TOKENS", "1234")
+        monkeypatch.setattr(python_builder, "OpenAI", lambda **kwargs: client)
+
+        state = create_initial_state("Build API", "python-request-test")
+        state["artifacts"] = ensure_workspace_layout(tmp_path)
+
+        result = python_builder.build(state)
+
+        assert result["python_output"]["status"] == "success"
+        request = create.call_args.kwargs
+        assert request["max_completion_tokens"] == 1234
+        assert request["reasoning_effort"] == "low"
+        assert "max_tokens" not in request
+
+    def test_returns_only_new_error_for_append_reducer(self, monkeypatch, tmp_path):
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(
+                    create=MagicMock(side_effect=RuntimeError("model failed"))
+                )
+            )
+        )
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr(python_builder, "OpenAI", lambda **kwargs: client)
+
+        state = create_initial_state("Build API", "python-error-test")
+        state["artifacts"] = ensure_workspace_layout(tmp_path)
+        state["errors"] = ["existing error"]
+
+        result = python_builder.build(state)
+
+        assert result["python_output"]["status"] == "failed"
+        assert result["errors"] == ["Python builder failed: model failed"]
 
 
 class TestCreatePythonPrompt:

@@ -11,11 +11,10 @@ These utilities provide the durable foundation for spec-driven execution:
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, TypedDict
 from uuid import uuid4
-
 
 WORKSPACE_DIRS = (
     "requirements",
@@ -150,12 +149,26 @@ class ArtifactManifest(TypedDict, total=False):
     repairs_dir: str
     reports_dir: str
     checkpoints_dir: str
+    runs_dir: str
+    run_dir: str
+    run_report_path: str
+    timeline_path: str
+    events_path: str
+    machine_dir: str
+    run_metadata_path: str
+    run_summary_path: str
+    artifact_manifest_path: str
+    steps_dir: str
+    comparison_report_markdown: str
+    delivery_summary_markdown: str
+    final_checkpoint_path: str
 
 
 class JobMetadata(TypedDict, total=False):
     """Durable metadata for a workflow job."""
 
     job_id: str
+    run_id: str
     job_status: str
     current_phase: str
     input_type: str
@@ -170,6 +183,7 @@ class CheckpointData(TypedDict, total=False):
     """Serializable checkpoint payload."""
 
     job_id: str
+    run_id: str
     checkpoint_ref: str
     current_phase: str
     job_status: str
@@ -189,7 +203,7 @@ class WorkspaceWriteResult(TypedDict, total=False):
 
 
 def _now_iso() -> str:
-    return datetime.now().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def create_job_metadata(
@@ -199,17 +213,20 @@ def create_job_metadata(
     current_phase: str = "intake",
     job_status: str = "initialized",
     job_id: Optional[str] = None,
+    run_id: Optional[str] = None,
     checkpoint_ref: Optional[str] = None,
     resume_token: Optional[str] = None,
 ) -> JobMetadata:
     """Create a serializable job metadata record."""
     timestamp = _now_iso()
     job_identifier = job_id or f"job-{uuid4().hex[:12]}"
+    run_identifier = run_id or f"run-{job_identifier.removeprefix('job-')}"
     checkpoint_identifier = checkpoint_ref or f"checkpoint-{uuid4().hex[:12]}"
     resume_identifier = resume_token or uuid4().hex
 
     return JobMetadata(
         job_id=job_identifier,
+        run_id=run_identifier,
         job_status=job_status,
         current_phase=current_phase,
         input_type=input_type,
@@ -225,6 +242,7 @@ def create_artifact_manifest(
     base_dir: str | Path = ".",
     *,
     project_name: str | None = None,
+    run_id: str | None = None,
 ) -> ArtifactManifest:
     """Create the standard artifact manifest without touching the filesystem."""
     root = Path(base_dir).resolve()
@@ -232,7 +250,7 @@ def create_artifact_manifest(
         if root.name != "projects":
             root = root / "projects"
         root = root / project_name
-    return ArtifactManifest(
+    manifest = ArtifactManifest(
         workspace_root=str(root),
         project_name=str(project_name or ""),
         requirements_dir=str(root / "requirements"),
@@ -245,20 +263,39 @@ def create_artifact_manifest(
         repairs_dir=str(root / "repairs"),
         reports_dir=str(root / "reports"),
         checkpoints_dir=str(root / "checkpoints"),
+        runs_dir=str(root / "runs"),
     )
+    if run_id:
+        run_dir = root / "runs" / run_id
+        machine_dir = run_dir / "_machine"
+        manifest.update(
+            run_dir=str(run_dir),
+            run_report_path=str(run_dir / "README.md"),
+            timeline_path=str(run_dir / "timeline.md"),
+            events_path=str(run_dir / "events.jsonl"),
+            machine_dir=str(machine_dir),
+            run_metadata_path=str(machine_dir / "metadata.json"),
+            run_summary_path=str(machine_dir / "summary.json"),
+            artifact_manifest_path=str(machine_dir / "artifacts.json"),
+            steps_dir=str(run_dir / "steps"),
+        )
+    return manifest
 
 
 def ensure_workspace_layout(
     base_dir: str | Path = ".",
     *,
     project_name: str | None = None,
+    run_id: str | None = None,
 ) -> ArtifactManifest:
     """
     Create the canonical workspace folders used by the spec-driven workflow.
 
     The function is idempotent and safe to call on every job start.
     """
-    manifest = create_artifact_manifest(base_dir, project_name=project_name)
+    manifest = create_artifact_manifest(
+        base_dir, project_name=project_name, run_id=run_id
+    )
     for key in (
         "requirements_dir",
         "architecture_dir",
@@ -270,8 +307,13 @@ def ensure_workspace_layout(
         "repairs_dir",
         "reports_dir",
         "checkpoints_dir",
+        "runs_dir",
     ):
         Path(manifest[key]).mkdir(parents=True, exist_ok=True)
+    if manifest.get("run_dir"):
+        Path(manifest["run_dir"]).mkdir(parents=True, exist_ok=True)
+        Path(manifest["machine_dir"]).mkdir(parents=True, exist_ok=True)
+        Path(manifest["steps_dir"]).mkdir(parents=True, exist_ok=True)
     return manifest
 
 
@@ -324,16 +366,25 @@ def restore_state_from_checkpoint(
     """Restore a workflow state from serialized checkpoint data."""
     restored = dict(checkpoint.get("state", {}))
     restored.setdefault("job_id", checkpoint.get("job_id", ""))
+    restored.setdefault(
+        "run_id",
+        checkpoint.get("run_id")
+        or f"run-{str(restored.get('job_id', '')).removeprefix('job-')}",
+    )
     restored.setdefault("current_phase", checkpoint.get("current_phase", "intake"))
     restored.setdefault("job_status", checkpoint.get("job_status", "initialized"))
     restored["artifacts"] = checkpoint.get("artifacts", restored.get("artifacts", {}))
-    restored["checkpoint_ref"] = checkpoint.get("checkpoint_ref", restored.get("checkpoint_ref", ""))
+    restored["checkpoint_ref"] = checkpoint.get(
+        "checkpoint_ref", restored.get("checkpoint_ref", "")
+    )
     if checkpoint_path is not None:
         restored["checkpoint_path"] = str(checkpoint_path)
     return restored
 
 
-def advance_job_phase(state: Dict[str, Any], phase: str, *, status: Optional[str] = None) -> Dict[str, Any]:
+def advance_job_phase(
+    state: Dict[str, Any], phase: str, *, status: Optional[str] = None
+) -> Dict[str, Any]:
     """Return a copy of state with an updated phase/status and timestamp."""
     if phase not in JOB_PHASES:
         raise ValueError(f"Unknown workflow phase: {phase}")
@@ -365,6 +416,7 @@ def build_checkpoint_data(
     """Build a serializable checkpoint payload from the current state."""
     return CheckpointData(
         job_id=str(state.get("job_id", "")),
+        run_id=str(state.get("run_id", "")),
         checkpoint_ref=str(state.get("checkpoint_ref", "")),
         current_phase=str(state.get("current_phase", "")),
         job_status=str(state.get("job_status", "")),

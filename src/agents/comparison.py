@@ -7,7 +7,17 @@ implementations and generates a comprehensive comparison report.
 
 import os
 from src.graph.state import BuilderState
-from src.prompts.comparison_prompt import create_comparison_prompt
+from src.observability import record_step_artifact
+from src.observability.model_usage import model_observability
+from src.agents.model_request import (
+    chat_completion_options,
+    completion_finish_reason,
+    require_visible_completion,
+)
+from src.prompts.comparison_prompt import (
+    COMPARISON_PROMPT_VERSION,
+    create_comparison_prompt,
+)
 from openai import OpenAI
 
 
@@ -57,10 +67,7 @@ builds did not complete successfully.
 """
 
 
-def create_full_report(
-    analysis_report: str,
-    state: BuilderState
-) -> str:
+def create_full_report(analysis_report: str, state: BuilderState) -> str:
     """
     Create the complete report with metadata and build status.
 
@@ -186,6 +193,11 @@ def compare(state: BuilderState) -> dict:
         True
     """
     print("[Comparison Agent] Starting analysis...")
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    observability = {
+        "model": model,
+        "prompt_version": COMPARISON_PROMPT_VERSION,
+    }
 
     try:
         # Get builder outputs
@@ -194,14 +206,34 @@ def compare(state: BuilderState) -> dict:
 
         python_status = python_output.get("status")
         nodejs_status = nodejs_output.get("status")
+        prompt = create_comparison_prompt(
+            state["user_prompt"],
+            python_output,
+            nodejs_output,
+        )
+        observability = model_observability(
+            model=model,
+            prompt=prompt,
+            prompt_version=COMPARISON_PROMPT_VERSION,
+        )
+        record_step_artifact("prompt.txt", prompt)
 
         # Check if both builds failed
         if python_status != "success" and nodejs_status != "success":
-            error_msg = "Both Python and Node.js builds failed. Cannot perform comparison."
+            error_msg = (
+                "Both Python and Node.js builds failed. Cannot perform comparison."
+            )
             print(f"[Comparison Agent] ⚠️  {error_msg}")
 
             report = create_error_report(error_msg)
-            return {"comparison_report": report}
+            return {
+                "comparison_report": report,
+                "comparison_metadata": {
+                    **observability,
+                    "status": "failed",
+                    "error": error_msg,
+                },
+            }
 
         # Get API key
         api_key = os.getenv("OPENAI_API_KEY")
@@ -210,30 +242,27 @@ def compare(state: BuilderState) -> dict:
             print(f"[Comparison Agent] ✗ Error: {error_msg}")
 
             report = create_error_report(error_msg)
-            return {"comparison_report": report}
+            return {
+                "comparison_report": report,
+                "comparison_metadata": {
+                    **observability,
+                    "status": "failed",
+                    "error": error_msg,
+                },
+            }
 
         # Create OpenAI client
         client = OpenAI(api_key=api_key)
-
-        # Create comparison prompt
-        prompt = create_comparison_prompt(
-            state["user_prompt"],
-            python_output,
-            nodejs_output
-        )
+        request_options = chat_completion_options(model)
 
         print("[Comparison Agent] Analyzing implementations with OpenAI...")
 
-        # Call OpenAI API with lower temperature for more focused analysis
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        # Reasoning models reject some sampling controls, so rely on the model's
+        # default sampling behavior and use the current completion-token field.
         response = client.chat.completions.create(
             model=model,
-            max_tokens=3000,  # Higher limit for detailed report
-            temperature=0.3,  # Lower temperature for more analytical response
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
+            messages=[{"role": "user", "content": prompt}],
+            **request_options,
         )
 
         # Extract report from response
@@ -244,9 +273,31 @@ def compare(state: BuilderState) -> dict:
                 analysis_report = content
             elif isinstance(content, list):
                 analysis_report = "".join(
-                    part.get("text", "") if isinstance(part, dict) else getattr(part, "text", "")
+                    (
+                        part.get("text", "")
+                        if isinstance(part, dict)
+                        else getattr(part, "text", "")
+                    )
                     for part in content
                 )
+        observability = model_observability(
+            model=model,
+            prompt=prompt,
+            prompt_version=COMPARISON_PROMPT_VERSION,
+            response=response,
+        )
+        observability.update(request_options)
+        record_step_artifact(
+            "response.json",
+            {
+                "id": getattr(response, "id", None),
+                "model": getattr(response, "model", model),
+                "content": analysis_report,
+                "finish_reason": completion_finish_reason(response),
+                "usage": observability,
+            },
+        )
+        require_visible_completion(analysis_report, response, request_options)
 
         # Create full report with metadata
         full_report = create_full_report(analysis_report, state)
@@ -254,7 +305,10 @@ def compare(state: BuilderState) -> dict:
         print("[Comparison Agent] ✓ Analysis complete")
 
         # Return state update
-        return {"comparison_report": full_report}
+        return {
+            "comparison_report": full_report,
+            "comparison_metadata": {**observability, "status": "success"},
+        }
 
     except Exception as e:
         error_msg = f"Comparison agent failed: {str(e)}"
@@ -265,5 +319,11 @@ def compare(state: BuilderState) -> dict:
 
         return {
             "comparison_report": report,
-            "errors": state.get("errors", []) + [error_msg]
+            "comparison_metadata": {
+                **observability,
+                "status": "failed",
+                "error": error_msg,
+            },
+            # `errors` has a LangGraph append reducer, so return only the new item.
+            "errors": [error_msg],
         }

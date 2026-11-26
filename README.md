@@ -8,7 +8,8 @@ AI-powered agent that generates backend applications in both Python (FastAPI) an
 - 🟢 **Node.js/Express** code generation
 - ⚡ **Parallel execution** of both builders
 - 📊 **Intelligent comparison** and recommendation
-- 🤖 **Powered by Claude** (Anthropic API)
+- 🔎 **Run-scoped observability** with step attempts and artifact hashes
+- 🤖 **Powered by OpenAI**
 - 🎯 **LangGraph orchestration**
 
 ## Setup
@@ -16,7 +17,7 @@ AI-powered agent that generates backend applications in both Python (FastAPI) an
 ### Prerequisites
 
 - Python 3.11 or higher
-- An Anthropic API key ([Get one here](https://console.anthropic.com/))
+- An OpenAI API key
 
 ### Installation
 
@@ -37,7 +38,7 @@ AI-powered agent that generates backend applications in both Python (FastAPI) an
 3. **Configure environment:**
    ```bash
    cp .env.example .env
-   # Edit .env and add your ANTHROPIC_API_KEY
+   # Edit .env and add your OPENAI_API_KEY
    ```
 
 4. **Run the agent:**
@@ -92,10 +93,12 @@ app-builder-agent/
 ├── src/
 │   ├── agents/          # Builder and comparison agents
 │   ├── graph/           # LangGraph workflow
+│   ├── observability/   # Run events, step artifacts, usage, and summaries
 │   ├── prompts/         # Prompt templates
 │   └── utils/           # Utilities
 ├── builds/              # Generated applications
 ├── reports/             # Comparison reports
+├── projects/            # Generated projects and run traces
 ├── features/            # Feature specs (spec-driven development)
 └── docs/                # Documentation (PRD, TRD)
 ```

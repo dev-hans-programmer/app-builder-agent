@@ -5,6 +5,9 @@ This module contains the system prompt and helper functions for generating
 prompts to Claude API for Python backend code generation.
 """
 
+PYTHON_BUILDER_PROMPT_VERSION = "1.0"
+
+
 PYTHON_BUILDER_SYSTEM_PROMPT = """You are an expert Python backend developer specializing in FastAPI.
 
 Your task is to generate a complete, production-ready FastAPI application based on the user's requirements.

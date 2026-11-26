@@ -10,7 +10,18 @@ import time
 from pathlib import Path
 from src.graph.state import BuilderState
 from src.graph.runtime import ensure_workspace_layout
-from src.prompts.nodejs_builder_prompt import create_nodejs_prompt
+from src.observability import record_step_artifact
+from src.observability.model_usage import model_observability
+from src.agents.model_request import (
+    chat_completion_options,
+    completion_finish_reason,
+    require_visible_completion,
+)
+from src.prompts.nodejs_builder_prompt import (
+    NODEJS_BUILDER_PROMPT_VERSION,
+    create_nodejs_prompt,
+)
+
 # Reuse utilities from Python builder
 from src.agents.python_builder import (
     extract_response_text,
@@ -57,16 +68,34 @@ def build(state: BuilderState) -> dict:
         5
     """
     start_time = time.time()
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    observability = {
+        "model": model,
+        "prompt_version": NODEJS_BUILDER_PROMPT_VERSION,
+    }
 
     try:
         manifest = state.get("artifacts") or ensure_workspace_layout(
             ".",
             project_name=state.get("project_name"),
         )
+        prompt = create_nodejs_prompt(
+            state["user_prompt"],
+            state["project_name"],
+        )
+        observability = model_observability(
+            model=model,
+            prompt=prompt,
+            prompt_version=NODEJS_BUILDER_PROMPT_VERSION,
+        )
+        record_step_artifact("prompt.txt", prompt)
+
         # Get API key from environment
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            print("[Node.js Builder] ⚠️  OPENAI_API_KEY not found; using offline placeholder output")
+            print(
+                "[Node.js Builder] ⚠️  OPENAI_API_KEY not found; using offline placeholder output"
+            )
             build_time = time.time() - start_time
             return {
                 "nodejs_output": {
@@ -76,34 +105,44 @@ def build(state: BuilderState) -> dict:
                     "files_created": [],
                     "framework": "Express.js",
                     "file_count": 0,
+                    "observability": observability,
                 },
                 "nodejs_build_time": build_time,
             }
 
         # Create OpenAI client
         client = OpenAI(api_key=api_key)
-
-        # Create prompt
-        prompt = create_nodejs_prompt(
-            state["user_prompt"],
-            state["project_name"]
-        )
+        request_options = chat_completion_options(model)
 
         print(f"[Node.js Builder] Generating code for: {state['project_name']}")
 
         # Call OpenAI API
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         response = client.chat.completions.create(
             model=model,
-            max_tokens=4096,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
+            messages=[{"role": "user", "content": prompt}],
+            **request_options,
         )
 
         # Extract text from response
         content = extract_response_text(response)
+        observability = model_observability(
+            model=model,
+            prompt=prompt,
+            prompt_version=NODEJS_BUILDER_PROMPT_VERSION,
+            response=response,
+        )
+        observability.update(request_options)
+        record_step_artifact(
+            "response.json",
+            {
+                "id": getattr(response, "id", None),
+                "model": getattr(response, "model", model),
+                "content": content,
+                "finish_reason": completion_finish_reason(response),
+                "usage": observability,
+            },
+        )
+        require_visible_completion(content, response, request_options)
 
         # Parse files from response
         files = parse_code_blocks(content)
@@ -127,10 +166,12 @@ def build(state: BuilderState) -> dict:
                 "status": "success",
                 "output_dir": str(output_dir),
                 "files_created": list(files.keys()),
+                "artifact_paths": [str(output_dir / filepath) for filepath in files],
                 "framework": "Express.js",
-                "file_count": len(files)
+                "file_count": len(files),
+                "observability": observability,
             },
-            "nodejs_build_time": build_time
+            "nodejs_build_time": build_time,
         }
 
     except Exception as e:
@@ -144,8 +185,10 @@ def build(state: BuilderState) -> dict:
         return {
             "nodejs_output": {
                 "status": "failed",
-                "error": str(e)
+                "error": str(e),
+                "observability": observability,
             },
             "nodejs_build_time": build_time,
-            "errors": state.get("errors", []) + [error_msg]
+            # `errors` has a LangGraph append reducer, so return only the new item.
+            "errors": [error_msg],
         }

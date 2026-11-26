@@ -5,6 +5,9 @@ This module contains the system prompt and helper functions for generating
 prompts to Claude API for Node.js backend code generation.
 """
 
+NODEJS_BUILDER_PROMPT_VERSION = "1.0"
+
+
 NODEJS_BUILDER_SYSTEM_PROMPT = """You are an expert Node.js backend developer specializing in Express.js.
 
 Your task is to generate a complete, production-ready Express.js application based on the user's requirements.

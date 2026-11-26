@@ -5,6 +5,9 @@ This module contains the system prompt and helper functions for generating
 prompts to Claude API for comparing Python and Node.js implementations.
 """
 
+COMPARISON_PROMPT_VERSION = "1.0"
+
+
 COMPARISON_SYSTEM_PROMPT = """You are an expert software architect with deep knowledge of both Python (FastAPI) and Node.js (Express) backend development.
 
 Your task is to analyze and compare two backend implementations of the same application - one in Python/FastAPI and one in Node.js/Express.
@@ -97,9 +100,7 @@ Provide a clear, justified recommendation for:
 
 
 def create_comparison_prompt(
-    user_prompt: str,
-    python_output: dict,
-    nodejs_output: dict
+    user_prompt: str, python_output: dict, nodejs_output: dict
 ) -> str:
     """
     Create the full prompt for comparison agent.
@@ -138,8 +139,16 @@ def create_comparison_prompt(
     nodejs_file_list = nodejs_output.get("files_created", [])
 
     # Format file lists
-    python_files_formatted = "\n".join(f"  - {f}" for f in python_file_list) if python_file_list else "  (No files)"
-    nodejs_files_formatted = "\n".join(f"  - {f}" for f in nodejs_file_list) if nodejs_file_list else "  (No files)"
+    python_files_formatted = (
+        "\n".join(f"  - {f}" for f in python_file_list)
+        if python_file_list
+        else "  (No files)"
+    )
+    nodejs_files_formatted = (
+        "\n".join(f"  - {f}" for f in nodejs_file_list)
+        if nodejs_file_list
+        else "  (No files)"
+    )
 
     return f"""{COMPARISON_SYSTEM_PROMPT}
 

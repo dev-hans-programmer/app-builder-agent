@@ -32,6 +32,8 @@ Example `.env` entry:
 ```env
 OPENAI_API_KEY=your_api_key_here
 OPENAI_MODEL=gpt-4o-mini
+OPENAI_MAX_COMPLETION_TOKENS=32768
+OPENAI_REASONING_EFFORT=low
 CLARIFICATION_GATE_ENABLED=true
 ```
 
@@ -79,19 +81,19 @@ task-manager
 ```
 
 The agent will normalize this input and then move through the spec-driven pipeline.
-If clarification is needed, the agent will ask the questions directly in the
-terminal during the same run and write the answers to one file:
-`requirements/clarification.json`.
+Automatic clarification questions are currently disabled, so runs proceed directly
+from requirement analysis to architecture planning.
 
 ## Turning Off The Clarification Gate
 
-If you want the agent to continue without pausing for open questions, disable the clarification gate in your `.env`:
+The clarification gate remains available for explicitly supplied open questions.
+To disable it completely, set:
 
 ```env
 CLARIFICATION_GATE_ENABLED=false
 ```
 
-When the gate is off, the agent still records open questions in the requirement artifact, but it will continue into architecture and planning instead of pausing.
+Automatically generated open questions are currently disabled regardless of this setting.
 
 ## What Happens Next
 
@@ -125,6 +127,7 @@ After a successful run, you will get:
 - comparison report for dual-stack jobs
 - checkpoint files
 - final delivery summary
+- an append-only event timeline and per-step diagnostic artifacts
 
 ## Where To Find The Generated Codebase
 
@@ -155,6 +158,35 @@ The agent also writes supporting files inside the same project folder:
 - `projects/<project-name>/repairs/`
 - `projects/<project-name>/reports/`
 - `projects/<project-name>/checkpoints/`
+- `projects/<project-name>/runs/<run-id>/`
+
+### Run Observability
+
+Every invocation has a durable run directory:
+
+```text
+projects/<project-name>/runs/<run-id>/
+├── README.md
+├── timeline.md
+├── events.jsonl
+├── steps/
+│   ├── 01-parse-input.md
+│   ├── 09-python-builder.md
+│   ├── 09-python-builder-prompt.md
+│   └── 09-python-builder-response.md
+└── _machine/
+    ├── metadata.json
+    ├── summary.json
+    └── artifacts.json
+```
+
+Open `README.md` first for status, failures, and recommended actions. Use
+`timeline.md` and the flat `steps/*.md` reports for investigation. `events.jsonl`
+and `_machine/` retain structured data for agents, retries, and future queue workers.
+
+Secrets and likely credentials are redacted before observability data is
+persisted. Configure the optional per-million-token rates in `.env` if you want
+`estimated_cost` populated.
 
 ### Requirements
 

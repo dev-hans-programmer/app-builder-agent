@@ -6,8 +6,48 @@ Tests cover:
 - Integration tests (optional mocked API tests)
 """
 
-import pytest
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from src.agents import nodejs_builder
+from src.graph import create_initial_state, ensure_workspace_layout
 from src.prompts.nodejs_builder_prompt import create_nodejs_prompt
+
+
+class TestNodejsBuilderModelRequest:
+    def test_uses_max_completion_tokens(self, monkeypatch, tmp_path):
+        response = SimpleNamespace(
+            id="chatcmpl-test",
+            model="test-sol-model",
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="```filename: index.js\nconsole.log('generated')\n```"
+                    )
+                )
+            ],
+            usage=None,
+        )
+        create = MagicMock(return_value=response)
+        client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_MODEL", "gpt-6.2-sol")
+        monkeypatch.setenv("OPENAI_MAX_COMPLETION_TOKENS", "1234")
+        monkeypatch.setattr(nodejs_builder, "OpenAI", lambda **kwargs: client)
+
+        state = create_initial_state("Build API", "node-request-test")
+        state["artifacts"] = ensure_workspace_layout(tmp_path)
+
+        result = nodejs_builder.build(state)
+
+        assert result["nodejs_output"]["status"] == "success"
+        request = create.call_args.kwargs
+        assert request["max_completion_tokens"] == 1234
+        assert request["reasoning_effort"] == "low"
+        assert "max_tokens" not in request
+        assert "temperature" not in request
 
 
 class TestCreateNodejsPrompt:
