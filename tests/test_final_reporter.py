@@ -15,7 +15,9 @@ class TestFinalReporter:
         state["execution_plan"] = {"ordered_specs": ["spec-1", "spec-2"]}
         state["completed_specs"] = ["spec-1"]
         state["failed_specs"] = []
-        state["verification_results"] = [{"status": "passed", "failure_category": "none"}]
+        state["verification_results"] = [
+            {"status": "passed", "failure_category": "none"}
+        ]
         state["repair_history"] = [{"status": "completed"}]
         state["python_output"] = {"status": "success"}
         state["nodejs_output"] = {"status": "success"}

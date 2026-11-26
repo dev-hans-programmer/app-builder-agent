@@ -35,7 +35,9 @@ class TestExecutionPlanGeneration:
         assert plan["checkpoints"]
         assert plan["retry_policy"]["max_attempts_per_spec"] == 2
 
-    def test_build_execution_plan_uses_fallback_checkpoint_when_parallel_groups_missing(self, monkeypatch):
+    def test_build_execution_plan_uses_fallback_checkpoint_when_parallel_groups_missing(
+        self, monkeypatch
+    ):
         requirements = build_requirement_artifact(
             "Build a secure API with authentication, database access, logging, and deployment.",
             "demo",
@@ -43,7 +45,9 @@ class TestExecutionPlanGeneration:
         architecture = build_architecture_artifact(requirements, "demo")
         spec_tree = build_spec_tree(requirements, architecture, "demo")
 
-        monkeypatch.setattr("src.agents.planner._parallel_groups", lambda nodes, ordered: [])
+        monkeypatch.setattr(
+            "src.agents.planner._parallel_groups", lambda nodes, ordered: []
+        )
         plan = build_execution_plan(spec_tree, "demo")
 
         assert plan["checkpoints"] == [f"checkpoint-after-{plan['ordered_specs'][0]}"]
@@ -53,6 +57,49 @@ class TestExecutionPlanGeneration:
 
         assert plan["ordered_specs"] == []
         assert plan["parallel_groups"] == []
+
+    def test_python_plan_splits_large_capabilities_into_bounded_tasks(self):
+        requirements = {
+            "acceptance_criteria": [
+                {
+                    "id": f"AC-{index:03d}",
+                    "requirement": f"Catalog capability {index}",
+                    "status": "approved",
+                }
+                for index in range(1, 8)
+            ]
+        }
+        architecture = {
+            "primary_entities": ["catalog item"],
+            "api_contracts": [
+                {
+                    "id": f"API-{index:03d}",
+                    "path": "/api/v1/catalog-items",
+                    "acceptance_criteria_ids": [f"AC-{index:03d}"],
+                }
+                for index in range(1, 8)
+            ],
+            "data_contracts": [],
+        }
+        plan = build_execution_plan(
+            {"epics": []},
+            "catalog",
+            requirements,
+            architecture,
+            {"enabled": True},
+        )
+
+        feature_tasks = [
+            task for task in plan["python_tasks"] if task["kind"] == "feature"
+        ]
+        assert len(feature_tasks) == 3
+        assert all(len(task["acceptance_criteria_ids"]) <= 3 for task in feature_tasks)
+        assert {
+            criterion
+            for task in feature_tasks
+            for criterion in task["acceptance_criteria_ids"]
+        } == {f"AC-{index:03d}" for index in range(1, 8)}
+        assert plan["python_task_strategy"] == "dynamic-v1"
 
     def test_render_execution_plan_markdown(self):
         plan = {
@@ -249,13 +296,19 @@ class TestPlanExecution:
             "Build a secure API with authentication, database access, logging, and deployment.",
             "demo-project",
         )
-        state["architecture_plan"] = build_architecture_artifact(state["requirements"], "demo-project")
-        state["spec_tree"] = build_spec_tree(state["requirements"], state["architecture_plan"], "demo-project")
+        state["architecture_plan"] = build_architecture_artifact(
+            state["requirements"], "demo-project"
+        )
+        state["spec_tree"] = build_spec_tree(
+            state["requirements"], state["architecture_plan"], "demo-project"
+        )
 
         result = plan_execution(state)
 
         assert result["current_phase"] == "planning"
         assert result["job_status"] == "running"
         assert result["execution_plan"]["artifact_paths"]["execution_plan_json"]
-        assert Path(result["execution_plan"]["artifact_paths"]["execution_plan_json"]).exists()
+        assert Path(
+            result["execution_plan"]["artifact_paths"]["execution_plan_json"]
+        ).exists()
         assert result["execution_plan"]["validation_errors"] == []

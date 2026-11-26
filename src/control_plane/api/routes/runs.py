@@ -14,13 +14,20 @@ from src.control_plane.api.contracts import (
     RunEventResponse,
     RunResponse,
     RunStepResponse,
+    RunTaskAttemptResponse,
+    RunTaskActionResponse,
+    RunTaskResponse,
 )
 from src.control_plane.api.dependencies import get_session
 from src.control_plane.application.commands import CreateRunCommand
 from src.control_plane.application.projects import ProjectService
 from src.control_plane.application.runs import RunService
+from src.control_plane.application.run_tasks import RunTaskService
 from src.control_plane.domain.run_status import TERMINAL_RUN_STATUSES
-from src.control_plane.infrastructure.database.repositories import RunRepository
+from src.control_plane.infrastructure.database.repositories import (
+    RunRepository,
+    RunTaskRepository,
+)
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -34,6 +41,47 @@ async def get_run(run_id: UUID, session: AsyncSession = Depends(get_session)):
 async def get_run_steps(run_id: UUID, session: AsyncSession = Depends(get_session)):
     await RunService(session).require(run_id)
     return await RunRepository(session).steps(run_id)
+
+
+@router.get("/{run_id}/tasks", response_model=list[RunTaskResponse])
+async def get_run_tasks(run_id: UUID, session: AsyncSession = Depends(get_session)):
+    await RunService(session).require(run_id)
+    return await RunTaskRepository(session).list_for_run(run_id)
+
+
+@router.get("/{run_id}/tasks/{task_id}", response_model=RunTaskResponse)
+async def get_run_task(
+    run_id: UUID, task_id: UUID, session: AsyncSession = Depends(get_session)
+):
+    return await RunTaskService(session).require(run_id, task_id)
+
+
+@router.get(
+    "/{run_id}/tasks/{task_id}/attempts",
+    response_model=list[RunTaskAttemptResponse],
+)
+async def get_run_task_attempts(
+    run_id: UUID, task_id: UUID, session: AsyncSession = Depends(get_session)
+):
+    task = await RunTaskService(session).require(run_id, task_id)
+    return await RunTaskRepository(session).attempts(task.id)
+
+
+@router.post(
+    "/{run_id}/tasks/{task_id}/retry",
+    response_model=RunTaskActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_run_task(
+    run_id: UUID, task_id: UUID, session: AsyncSession = Depends(get_session)
+):
+    task = await RunTaskService(session).retry(run_id, task_id)
+    return RunTaskActionResponse(
+        run_id=run_id,
+        task_id=task.id,
+        status=task.status,
+        message="Run task queued for retry",
+    )
 
 
 @router.get("/{run_id}/events", response_model=list[RunEventResponse])
@@ -139,6 +187,7 @@ async def retry_run(run_id: UUID, session: AsyncSession = Depends(get_session)):
         request=source.request,
         target_stack=source.target_stack,
         clarification_gate_enabled=source.clarification_gate_enabled,
+        execution_mode=source.execution_mode,
     )
     run, _ = await RunService(session).create(project, command, retry_of_id=source.id)
     return run

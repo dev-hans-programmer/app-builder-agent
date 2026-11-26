@@ -124,7 +124,7 @@ class TestCreateNodejsPrompt:
         test_cases = [
             ("Simple hello world API", "hello-api"),
             ("E-commerce backend with authentication", "ecommerce-backend"),
-            ("Real-time chat API with WebSocket support", "chat-api")
+            ("Real-time chat API with WebSocket support", "chat-api"),
         ]
 
         for user_prompt, project_name in test_cases:

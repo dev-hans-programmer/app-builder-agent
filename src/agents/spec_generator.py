@@ -191,7 +191,9 @@ def _build_spec_artifact(
     ]
     api_contract_ids = [item["id"] for item in architecture.get("api_contracts", [])]
     data_contract_ids = [item["id"] for item in architecture.get("data_contracts", [])]
-    contract_ids = api_contract_ids if module_name in {"transport", "application"} else []
+    contract_ids = (
+        api_contract_ids if module_name in {"transport", "application"} else []
+    )
     if module_name in {"domain", "data", "application"}:
         contract_ids = [*contract_ids, *data_contract_ids]
     spec = {
@@ -234,7 +236,9 @@ def _build_spec_artifact(
     return spec
 
 
-def _build_feature_from_spec(spec: Dict[str, Any], architecture: Dict[str, Any]) -> Dict[str, Any]:
+def _build_feature_from_spec(
+    spec: Dict[str, Any], architecture: Dict[str, Any]
+) -> Dict[str, Any]:
     feature_id = f"{spec['id']}-feature"
     components = [
         {
@@ -270,7 +274,12 @@ def _build_feature_from_spec(spec: Dict[str, Any], architecture: Dict[str, Any])
     }
 
 
-def _build_epic_from_specs(project_name: str, requirements: Dict[str, Any], architecture: Dict[str, Any], specs: list[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_epic_from_specs(
+    project_name: str,
+    requirements: Dict[str, Any],
+    architecture: Dict[str, Any],
+    specs: list[Dict[str, Any]],
+) -> Dict[str, Any]:
     epic_id = f"{project_name}-epic-implementation-foundation"
     features = [_build_feature_from_spec(spec, architecture) for spec in specs]
     return {
@@ -300,7 +309,9 @@ def _build_epic_from_specs(project_name: str, requirements: Dict[str, Any], arch
     }
 
 
-def _flatten_tasks_from_features(features: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+def _flatten_tasks_from_features(
+    features: list[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
     tasks: list[Dict[str, Any]] = []
     for feature in features:
         for component in feature.get("components", []):
@@ -381,7 +392,14 @@ def _render_tasks_markdown(spec: Dict[str, Any]) -> str:
         lines.append(
             f"| {task.get('status', 'planned')} | {task.get('title', '')} | {task.get('objective', '')} |"
         )
-    lines.extend(["", "## Verification", *[f"- {item}" for item in spec.get("verification_steps", [])], ""])
+    lines.extend(
+        [
+            "",
+            "## Verification",
+            *[f"- {item}" for item in spec.get("verification_steps", [])],
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -458,8 +476,22 @@ def _build_component(
     label = concern or module_name
     component_id = f"{project_name}-component-{feature_slug}-{component_slug}"
     tasks = [
-        _build_task(project_name, feature_slug, component_slug, 1, f"{label} scaffold", module_name),
-        _build_task(project_name, feature_slug, component_slug, 2, f"{label} verification", module_name),
+        _build_task(
+            project_name,
+            feature_slug,
+            component_slug,
+            1,
+            f"{label} scaffold",
+            module_name,
+        ),
+        _build_task(
+            project_name,
+            feature_slug,
+            component_slug,
+            2,
+            f"{label} verification",
+            module_name,
+        ),
     ]
     return {
         "id": component_id,
@@ -593,7 +625,9 @@ def build_spec_tree(
     epic = _build_epic_from_specs(project_name, requirements, architecture, specs)
     features = epic.get("features", [])
     flat_index: list[str] = [epic["id"]]
-    dependency_graph: Dict[str, list[str]] = {epic["id"]: list(epic.get("dependencies", []))}
+    dependency_graph: Dict[str, list[str]] = {
+        epic["id"]: list(epic.get("dependencies", []))
+    }
 
     for spec, feature in zip(specs, features, strict=False):
         flat_index.append(spec["id"])
@@ -685,13 +719,19 @@ def validate_spec_tree(spec_tree: Dict[str, Any]) -> list[str]:
             errors.append(f"Epic {epic.get('id', 'unknown')} must include features.")
         for feature in epic.get("features", []):
             if not feature.get("components"):
-                errors.append(f"Feature {feature.get('id', 'unknown')} must include components.")
+                errors.append(
+                    f"Feature {feature.get('id', 'unknown')} must include components."
+                )
             for component in feature.get("components", []):
                 if not component.get("tasks"):
-                    errors.append(f"Component {component.get('id', 'unknown')} must include tasks.")
+                    errors.append(
+                        f"Component {component.get('id', 'unknown')} must include tasks."
+                    )
                 for task in component.get("tasks", []):
                     if not task.get("verification_steps"):
-                        errors.append(f"Task {task.get('id', 'unknown')} must include verification steps.")
+                        errors.append(
+                            f"Task {task.get('id', 'unknown')} must include verification steps."
+                        )
     return errors
 
 
@@ -720,6 +760,8 @@ def generate_specs(state: BuilderState) -> Dict[str, Any]:
         "artifacts": manifest,
     }
     updates["checkpoint_path"] = str(
-        persist_job_checkpoint({**state, **updates}, manifest, suffix="spec_decomposition")
+        persist_job_checkpoint(
+            {**state, **updates}, manifest, suffix="spec_decomposition"
+        )
     )
     return updates

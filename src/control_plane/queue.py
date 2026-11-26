@@ -19,6 +19,7 @@ worker_init.connect(_load_worker_environment, weak=False)
 worker_process_init.connect(_load_worker_environment, weak=False)
 
 run_exchange = Exchange("runs", type="direct", durable=True)
+run_task_exchange = Exchange("run_tasks", type="direct", durable=True)
 maintenance_exchange = Exchange("maintenance", type="direct", durable=True)
 
 celery_app = Celery(
@@ -40,6 +41,13 @@ celery_app.conf.update(
     task_default_queue="runs",
     task_queues=(
         Queue(
+            "run_tasks",
+            exchange=run_task_exchange,
+            routing_key="run.task.execute",
+            durable=True,
+            queue_arguments={"x-queue-type": "quorum"},
+        ),
+        Queue(
             "runs",
             exchange=run_exchange,
             routing_key="run.execute",
@@ -56,6 +64,14 @@ celery_app.conf.update(
     ),
     task_routes={
         "control_plane.execute_run": {"queue": "runs", "routing_key": "run.execute"},
+        "control_plane.execute_run_task": {
+            "queue": "run_tasks",
+            "routing_key": "run.task.execute",
+        },
+        "control_plane.finalize_dynamic_run": {
+            "queue": "runs",
+            "routing_key": "run.finalize",
+        },
         "control_plane.dispatch_outbox": {
             "queue": "maintenance",
             "routing_key": "maintenance.outbox",
@@ -63,6 +79,10 @@ celery_app.conf.update(
         "control_plane.recover_stale_runs": {
             "queue": "maintenance",
             "routing_key": "maintenance.recovery",
+        },
+        "control_plane.recover_stale_run_tasks": {
+            "queue": "maintenance",
+            "routing_key": "maintenance.task-recovery",
         },
     },
     beat_schedule={
@@ -72,6 +92,10 @@ celery_app.conf.update(
         },
         "recover-stale-runs": {
             "task": "control_plane.recover_stale_runs",
+            "schedule": 60.0,
+        },
+        "recover-stale-run-tasks": {
+            "task": "control_plane.recover_stale_run_tasks",
             "schedule": 60.0,
         },
     },

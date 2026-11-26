@@ -140,7 +140,9 @@ class TestCheckpointing:
         manifest = ensure_workspace_layout(tmp_path)
         checkpoint = build_checkpoint_data(state, manifest)
 
-        restored = restore_state_from_checkpoint(checkpoint, checkpoint_path=tmp_path / "checkpoints" / "job.json")
+        restored = restore_state_from_checkpoint(
+            checkpoint, checkpoint_path=tmp_path / "checkpoints" / "job.json"
+        )
 
         assert restored["job_id"] == state["job_id"]
         assert restored["checkpoint_path"].endswith("job.json")

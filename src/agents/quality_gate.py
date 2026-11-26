@@ -143,6 +143,12 @@ def _python_commands(
                 "uv is not installed",
             ),
             (
+                "lint_apply",
+                [*uv_run, "ruff", "check", "--fix", "."] if uv else None,
+                True,
+                "uv is not installed",
+            ),
+            (
                 "format_apply",
                 [*uv_run, "ruff", "format", "."] if uv else None,
                 True,
@@ -168,7 +174,7 @@ def _python_commands(
             ),
             (
                 "test",
-                [*uv_run, "pytest", "-q"] if uv else None,
+                [*uv_run, "python", "-m", "pytest", "-q"] if uv else None,
                 True,
                 "uv is not installed",
             ),
@@ -184,7 +190,11 @@ def _python_commands(
                     *uv_run,
                     "python",
                     "-c",
-                    "from app.main import app; assert app is not None",
+                    (
+                        "import app.main as main; "
+                        "assert getattr(main, 'app', None) is not None "
+                        "or callable(getattr(main, 'create_app', None))"
+                    ),
                 ]
                 if uv
                 else None,

@@ -33,6 +33,7 @@ class ControlPlaneSettings(BaseSettings):
     event_poll_seconds: float = Field(default=1.0, gt=0)
     event_heartbeat_seconds: float = Field(default=15.0, gt=0)
     outbox_batch_size: int = Field(default=50, ge=1, le=500)
+    execution_mode: Literal["legacy", "dynamic_serial", "dynamic_parallel"] = "legacy"
     github_owner: str | None = Field(
         default=None,
         validation_alias=AliasChoices("GITHUB_OWNER", "CONTROL_GITHUB_OWNER"),

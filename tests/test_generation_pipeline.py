@@ -195,6 +195,7 @@ def test_production_quality_commands_are_pinned_to_generated_project(
     ]
     for category in (
         "build",
+        "lint_apply",
         "format_apply",
         "format",
         "lint",
@@ -210,6 +211,7 @@ def test_production_quality_commands_are_pinned_to_generated_project(
             str(generated_root.resolve()),
         ]
     assert commands["container"] is None
+    assert commands["test"][-4:] == ["python", "-m", "pytest", "-q"]
 
 
 def test_quality_environment_isolated_and_container_has_safe_placeholder(

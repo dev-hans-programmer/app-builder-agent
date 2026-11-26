@@ -41,7 +41,9 @@ class TestSafeWrites:
         result = write_json_safely(tmp_path, "payload.json", {"hello": "world"})
 
         assert result["changed"] is True
-        assert json.loads(Path(result["path"]).read_text(encoding="utf-8")) == {"hello": "world"}
+        assert json.loads(Path(result["path"]).read_text(encoding="utf-8")) == {
+            "hello": "world"
+        }
 
 
 class TestExecuteSpec:
@@ -67,7 +69,9 @@ class TestExecuteSpec:
 
         result = execute_spec(state)
 
-        summary_path = Path(tmp_path) / "execution" / result["current_spec_id"] / "summary.json"
+        summary_path = (
+            Path(tmp_path) / "execution" / result["current_spec_id"] / "summary.json"
+        )
         trace_path = Path(tmp_path) / "plans" / "execution-trace.json"
         checkpoint_path = Path(result["checkpoint_path"])
 

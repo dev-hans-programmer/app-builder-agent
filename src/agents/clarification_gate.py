@@ -47,7 +47,10 @@ def _responses_from_payload(payload: Any) -> list[dict[str, str]]:
 
 
 def _response_template(requirements: Dict[str, Any]) -> list[dict[str, str]]:
-    return [{"question": question, "answer": ""} for question in requirements.get("open_questions", [])]
+    return [
+        {"question": question, "answer": ""}
+        for question in requirements.get("open_questions", [])
+    ]
 
 
 def _clarification_path(requirements_dir: str | Path) -> Path:
@@ -79,7 +82,11 @@ def _merge_clarifications(
     responses: list[dict[str, str]],
 ) -> Dict[str, Any]:
     open_questions = list(requirements.get("open_questions", []))
-    response_map = {item["question"]: item.get("answer", "").strip() for item in responses if item["question"]}
+    response_map = {
+        item["question"]: item.get("answer", "").strip()
+        for item in responses
+        if item["question"]
+    }
 
     resolved: list[dict[str, str]] = []
     pending: list[str] = []
@@ -132,13 +139,17 @@ def load_clarification_responses(
         stripped = line.strip()
         if stripped.startswith("- Q:"):
             if current_question is not None:
-                payload_lines.append({"question": current_question, "answer": current_answer or ""})
+                payload_lines.append(
+                    {"question": current_question, "answer": current_answer or ""}
+                )
             current_question = stripped.removeprefix("- Q:").strip()
             current_answer = ""
         elif stripped.startswith("A:") or stripped.startswith("- A:"):
             current_answer = stripped.split(":", 1)[1].strip()
     if current_question is not None:
-        payload_lines.append({"question": current_question, "answer": current_answer or ""})
+        payload_lines.append(
+            {"question": current_question, "answer": current_answer or ""}
+        )
 
     return payload_lines
 
@@ -152,8 +163,12 @@ def create_clarification_template(
     """Write the single clarification artifact."""
     requirements_dir = manifest["requirements_dir"]
     clarification_path = _clarification_path(requirements_dir)
-    response_template = responses if responses is not None else _response_template(requirements)
-    answered_count = sum(1 for item in response_template if item.get("answer", "").strip())
+    response_template = (
+        responses if responses is not None else _response_template(requirements)
+    )
+    answered_count = sum(
+        1 for item in response_template if item.get("answer", "").strip()
+    )
     lines = [
         "# Clarification",
         "",
@@ -191,7 +206,9 @@ def clarify_requirements(state: BuilderState) -> Dict[str, Any]:
             "artifacts": manifest,
         }
         updates["checkpoint_path"] = str(
-            persist_job_checkpoint({**state, **updates}, manifest, suffix="clarification_gate")
+            persist_job_checkpoint(
+                {**state, **updates}, manifest, suffix="clarification_gate"
+            )
         )
         return updates
 
@@ -213,7 +230,9 @@ def clarify_requirements(state: BuilderState) -> Dict[str, Any]:
             "artifacts": manifest,
         }
         updates["checkpoint_path"] = str(
-            persist_job_checkpoint({**state, **updates}, manifest, suffix="clarification_gate")
+            persist_job_checkpoint(
+                {**state, **updates}, manifest, suffix="clarification_gate"
+            )
         )
         return updates
 
@@ -239,7 +258,9 @@ def clarify_requirements(state: BuilderState) -> Dict[str, Any]:
         job_id,
         responses,
     )
-    merged_requirement_artifacts = persist_requirement_artifacts(merged_requirements, manifest, job_id)
+    merged_requirement_artifacts = persist_requirement_artifacts(
+        merged_requirements, manifest, job_id
+    )
     artifact_paths = {
         **merged_requirement_artifacts,
         **clarification_artifact_paths,
@@ -257,6 +278,8 @@ def clarify_requirements(state: BuilderState) -> Dict[str, Any]:
         "artifacts": manifest,
     }
     updates["checkpoint_path"] = str(
-        persist_job_checkpoint({**state, **updates}, manifest, suffix="clarification_gate")
+        persist_job_checkpoint(
+            {**state, **updates}, manifest, suffix="clarification_gate"
+        )
     )
     return updates

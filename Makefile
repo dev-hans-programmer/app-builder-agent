@@ -24,7 +24,7 @@ run-api-dev:
 	uv run uvicorn src.control_plane.app:app --host 127.0.0.1 --port 8080 --reload --reload-dir src --timeout-graceful-shutdown 5
 
 run-worker:
-	uv run celery -A src.control_plane.queue:celery_app worker -Q runs,maintenance --loglevel=INFO
+	uv run celery -A src.control_plane.queue:celery_app worker -Q runs,run_tasks,maintenance --loglevel=INFO
 
 run-maintenance-worker:
 	uv run celery -A src.control_plane.queue:celery_app worker -Q maintenance --loglevel=INFO

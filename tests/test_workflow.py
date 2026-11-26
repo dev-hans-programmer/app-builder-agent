@@ -8,6 +8,7 @@ and end-to-end workflow execution.
 import json
 import pytest
 from pathlib import Path
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from src.graph import (
     BuilderState,
@@ -435,3 +436,45 @@ class TestWorkflowExecution:
         assert final_state["repair_history"] is not None
         assert not final_state["requirements"].get("clarification_answers")
         assert final_state["requirements"]["open_questions"] == []
+
+
+def test_dynamic_workflow_pauses_after_planning_and_can_skip_builder(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("REQUIREMENTS_MODEL_ENABLED", "false")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    state = create_initial_state(
+        "Build catalog create, update, list, and delete endpoints",
+        "dynamic-catalog",
+        target_stack="python",
+        clarification_gate_enabled=False,
+        workspace_root=tmp_path,
+    )
+    config = {"configurable": {"thread_id": "dynamic-catalog"}}
+    checkpointer = MemorySaver()
+    planning_graph = create_workflow(
+        checkpointer=checkpointer,
+        interrupt_after=["planning"],
+    )
+
+    planned = planning_graph.invoke(state, config=config)
+
+    assert planned["execution_plan"]["python_task_strategy"] == "dynamic-v1"
+    assert planning_graph.get_state(config).next == ("generation_start",)
+
+    finalization_graph = create_workflow(checkpointer=checkpointer)
+    finalization_graph.update_state(
+        config,
+        {
+            "python_output": {
+                "status": "success",
+                "output_dir": str(tmp_path / "builds/python"),
+                "files_created": [],
+                "patches": [],
+                "task_runs": [],
+            },
+            "job_status": "running",
+        },
+        as_node="python_builder",
+    )
+    assert finalization_graph.get_state(config).next == ("quality_gate",)

@@ -39,6 +39,9 @@ class RunCreate(ApiModel):
     target_stack: Literal["python", "nodejs", "both"] = "python"
     clarification_gate_enabled: bool = False
     idempotency_key: str | None = Field(default=None, max_length=160)
+    execution_mode: Literal["legacy", "dynamic_serial", "dynamic_parallel"] | None = (
+        None
+    )
 
 
 class RunResponse(ApiModel):
@@ -47,6 +50,7 @@ class RunResponse(ApiModel):
     retry_of_id: UUID | None
     request: str
     target_stack: str
+    execution_mode: str
     clarification_gate_enabled: bool
     status: str
     phase: str
@@ -134,6 +138,69 @@ class ArtifactResponse(ApiModel):
 
 class ActionResponse(ApiModel):
     run_id: UUID
+    status: str
+    message: str
+
+
+class RunTaskResponse(ApiModel):
+    id: UUID
+    run_id: UUID
+    task_key: str
+    plan_task_id: str
+    kind: str
+    title: str
+    objective: str
+    status: str
+    sequence: int
+    priority: int
+    weight: float
+    acceptance_criteria_ids: list[str]
+    contract_ids: list[str]
+    policy_rule_ids: list[str]
+    allowed_paths: list[str]
+    verification: list[str]
+    depends_on_task_ids: list[UUID]
+    attempt_count: int
+    max_attempts: int
+    queue_task_id: str | None
+    worker_id: str | None
+    queued_at: datetime | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    heartbeat_at: datetime | None
+    lease_expires_at: datetime | None
+    input_context_hash: str | None
+    output_patch_hash: str | None
+    error_type: str | None
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RunTaskAttemptResponse(ApiModel):
+    id: UUID
+    task_id: UUID
+    attempt: int
+    status: str
+    queue_task_id: str | None
+    worker_id: str | None
+    model: str | None
+    prompt_version: str | None
+    prompt_hash: str | None
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    estimated_cost: float
+    started_at: datetime | None
+    ended_at: datetime | None
+    duration_ms: float | None
+    error_type: str | None
+    error_message: str | None
+
+
+class RunTaskActionResponse(ApiModel):
+    run_id: UUID
+    task_id: UUID
     status: str
     message: str
 

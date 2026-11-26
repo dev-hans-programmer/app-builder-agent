@@ -56,7 +56,9 @@ class TestArchitectureArtifact:
         assert "data" not in architecture["module_map"]
         assert "security" not in architecture["module_map"]
         assert "observability" not in architecture["module_map"]
-        assert any(item.startswith("Primary entities:") for item in architecture["data_model"])
+        assert any(
+            item.startswith("Primary entities:") for item in architecture["data_model"]
+        )
         assert architecture["primary_entities"]
         assert architecture["rbac_model"] == []
 
@@ -77,7 +79,9 @@ class TestArchitectureArtifact:
         assert "infrastructure" in architecture["module_map"]
         assert any("search" in item.lower() for item in architecture["api_surface"])
         assert architecture["deployment_notes"]
-        assert architecture["service_boundaries"] == [] or any("background" in item.lower() for item in architecture["service_boundaries"])
+        assert architecture["service_boundaries"] == [] or any(
+            "background" in item.lower() for item in architecture["service_boundaries"]
+        )
 
     def test_render_architecture_markdown(self):
         requirements = build_requirement_artifact(
@@ -151,7 +155,9 @@ class TestConsistencyChecks:
 
 class TestAnalyzeArchitecture:
     def test_analyze_architecture_updates_state(self, tmp_path):
-        state = create_initial_state("Build a secure API with auth and database", "My Project")
+        state = create_initial_state(
+            "Build a secure API with auth and database", "My Project"
+        )
         state["artifacts"] = ensure_workspace_layout(tmp_path)
         state["requirements"] = build_requirement_artifact(
             "Build a secure API with auth and database",
@@ -163,5 +169,7 @@ class TestAnalyzeArchitecture:
         assert result["job_status"] == "running"
         assert result["current_phase"] == "architecture_planning"
         assert result["architecture_plan"]["artifact_paths"]["architecture_json"]
-        assert Path(result["architecture_plan"]["artifact_paths"]["architecture_json"]).exists()
+        assert Path(
+            result["architecture_plan"]["artifact_paths"]["architecture_json"]
+        ).exists()
         assert isinstance(result["architecture_plan"]["consistency_errors"], list)

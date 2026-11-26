@@ -193,7 +193,15 @@ def execute_spec(state: BuilderState) -> Dict[str, Any]:
     trace_json_path = Path(trace_dir) / "execution-trace.json"
     trace_md_path = Path(trace_dir) / "execution-trace.md"
 
-    trace_entry = _build_trace_entry(spec_node, changed_files, str(_safe_resolve_path(workspace_root, execution_dir / spec_slug / "summary.json")))
+    trace_entry = _build_trace_entry(
+        spec_node,
+        changed_files,
+        str(
+            _safe_resolve_path(
+                workspace_root, execution_dir / spec_slug / "summary.json"
+            )
+        ),
+    )
     execution_trace = list(state.get("execution_trace", [])) + [trace_entry]
 
     trace_json_result = write_json_safely(

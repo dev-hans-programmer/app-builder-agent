@@ -42,11 +42,17 @@ The synchronous generation nodes never create their own async connection pools. 
 callbacks submit writes to the worker's existing event loop and continue only after PostgreSQL has
 committed the event.
 
+For `dynamic_serial` Python runs, the first worker stops after planning, persists the task DAG, and
+releases the run worker. Individual `run.task.execute` messages generate bounded slices. The
+`run.finalize` message resumes the common quality/repair/traceability path after all slices pass.
+
 ## Monitor and replay
 
 ```text
 GET run       → current projection from runs
 GET steps     → attempt/error projection from run_steps
+GET tasks     → dependency/status projection from run_tasks
+GET attempts  → append-only evidence from run_task_attempts
 GET events    → ordered audit stream from run_events
 SSE stream    → replay after Last-Event-ID, poll for committed events, heartbeat, stop at terminal
 GET artifacts → metadata from PostgreSQL; bytes through ArtifactStore

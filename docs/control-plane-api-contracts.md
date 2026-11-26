@@ -27,6 +27,10 @@ Create body:
 | `GET` | `/api/v1/projects/{project_id}/runs` | Run history |
 | `GET` | `/api/v1/runs/{run_id}` | Status, progress, usage, error, and GitHub delivery result |
 | `GET` | `/api/v1/runs/{run_id}/steps` | Every node attempt and its diagnostics |
+| `GET` | `/api/v1/runs/{run_id}/tasks` | Dynamic task DAG and current task status |
+| `GET` | `/api/v1/runs/{run_id}/tasks/{task_id}` | One task projection and dependency IDs |
+| `GET` | `/api/v1/runs/{run_id}/tasks/{task_id}/attempts` | Append-only task attempt history |
+| `POST` | `/api/v1/runs/{run_id}/tasks/{task_id}/retry` | Requeue one failed task; `202` |
 | `GET` | `/api/v1/runs/{run_id}/events` | Durable event replay (`after_id`, `limit`) |
 | `GET` | `/api/v1/runs/{run_id}/logs` | Human-relevant event/log projection |
 | `GET` | `/api/v1/runs/{run_id}/events/stream` | Live Server-Sent Events |
@@ -41,6 +45,7 @@ Create body:
 {
   "request": "Build a Todo backend with authentication and owned todos",
   "target_stack": "python",
+  "execution_mode": "dynamic_serial",
   "clarification_gate_enabled": false,
   "idempotency_key": "client-request-0182"
 }
@@ -77,7 +82,7 @@ continuing live delivery. Heartbeat comments keep idle connections open.
 | `GET` | `/health/live` | Process liveness |
 | `GET` | `/health/ready` | PostgreSQL, RabbitMQ, and Redis readiness |
 
-There are 19 operations in the initial API surface. FastAPI exposes the generated OpenAPI document
+There are 23 operations in the current API surface. FastAPI exposes the generated OpenAPI document
 at `/openapi.json` and interactive docs at `/docs`.
 
 Artifact metadata remains queryable after retention cleanup. Download returns `410 Gone` when

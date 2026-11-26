@@ -110,6 +110,10 @@ Open `http://127.0.0.1:8080/docs`. PostgreSQL is the status/event source of trut
 are available at `/api/v1/runs/{run_id}/events/stream`. Generated files use local run-isolated
 storage under `data/`; no S3 dependency is required.
 
+Set `CONTROL_EXECUTION_MODE=dynamic_serial` to enable dependency-aware Python feature tasks with
+task-level queueing, retries, leases, progress, and attempts. Keep `legacy` during rollout. See
+[Dynamic task architecture](docs/dynamic-task-architecture.md).
+
 To publish successful builds, configure `GITHUB_OWNER`, `GITHUB_TOKEN`, visibility, and commit author
 values in `.env`, then restart the worker. See [GitHub delivery](docs/github-delivery.md).
 Set `CONTROL_RETAIN_LOCAL_BUILDS=false` to remove `builds/` only after GitHub publishing succeeds;
@@ -123,6 +127,9 @@ Architecture and contracts:
 - [Data model](docs/control-plane-data-model.md)
 - [Data flow](docs/control-plane-data-flow.md)
 - [GitHub delivery](docs/github-delivery.md)
+- [Dynamic task architecture](docs/dynamic-task-architecture.md)
+- [Dynamic task data model](docs/dynamic-task-data-model.md)
+- [Dynamic task queue flow](docs/dynamic-task-queue-flow.md)
 
 ### Example
 

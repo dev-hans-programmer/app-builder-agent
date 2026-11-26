@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.control_plane.api.contracts import (
@@ -78,12 +78,17 @@ async def archive_project(
 async def create_run(
     project_id: UUID,
     payload: RunCreate,
+    request: Request,
     response: Response,
     session: AsyncSession = Depends(get_session),
 ):
     project = await ProjectService(session).require(project_id)
+    command_payload = payload.model_dump()
+    command_payload["execution_mode"] = (
+        payload.execution_mode or request.app.state.settings.execution_mode
+    )
     run, created = await RunService(session).create(
-        project, CreateRunCommand(**payload.model_dump())
+        project, CreateRunCommand(**command_payload)
     )
     if not created:
         response.status_code = status.HTTP_200_OK

@@ -18,3 +18,4 @@ class CreateRunCommand:
     target_stack: str = "python"
     clarification_gate_enabled: bool = False
     idempotency_key: str | None = None
+    execution_mode: str | None = None

@@ -15,7 +15,7 @@ FastAPI control plane ───────────────┐
 PostgreSQL                     local ArtifactStore
   │ transactional outbox             data/projects/<project>/<run>/
   ▼
-Celery beat/dispatcher → RabbitMQ quorum queue → Celery run worker
+Celery beat/dispatcher → RabbitMQ quorum queues → run/task workers
                                                   │
                                                   ▼
                                      LangGraph + Postgres checkpoints
@@ -36,7 +36,8 @@ Celery beat/dispatcher → RabbitMQ quorum queue → Celery run worker
 - **RabbitMQ quorum queues** deliver long-running work at least once. RabbitMQ is not queried as a
   source of user-visible status.
 - **Celery beat** schedules outbox dispatch and stale-run recovery.
-- **Celery workers** claim runs, heartbeat their leases, run LangGraph, and index output artifacts.
+- **Celery workers** claim runs or dynamic tasks, heartbeat their leases, run LangGraph/model work,
+  and index output artifacts.
 - **LangGraph `AsyncPostgresSaver`** owns its checkpoint tables. It uses its upstream `psycopg`
   adapter in isolation; Alembic deliberately ignores these externally managed tables.
 - **Redis** receives best-effort event notifications. Durable SSE replay always reads PostgreSQL,
@@ -59,6 +60,8 @@ Celery beat/dispatcher → RabbitMQ quorum queue → Celery run worker
 7. `resume` continues the same run/thread from a checkpoint. `retry` creates a new linked run.
 8. GitHub delivery persists its repository reservation and embeds the run ID in the repository and
    commit, making worker redelivery idempotent.
+9. Dynamic Python runs persist a task DAG, retry only the failed task, and enter final integration
+   only after every predecessor succeeds.
 
 This is at-least-once execution, not exactly-once execution. External side effects added later must
 use their own idempotency keys.
@@ -73,6 +76,8 @@ use their own idempotency keys.
 - PostgreSQL row locks with `SKIP LOCKED` allow multiple dispatchers and recovery workers.
 - Local artifacts require shared storage when workers run on multiple hosts. Until S3 is introduced,
   mount one durable shared volume at `CONTROL_ARTIFACT_ROOT`.
+- Keep dynamic execution in `dynamic_serial` with local storage. Parallel task writers require
+  isolated Git worktrees and a shared workspace before production use.
 
 ## Security boundary
 

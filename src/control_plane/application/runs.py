@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from src.control_plane.infrastructure.database.models import (
     Project,
     Run,
     RunEvent,
+    RunTask,
 )
 from src.control_plane.infrastructure.database.repositories import RunRepository
 
@@ -42,6 +44,11 @@ class RunService:
     ) -> tuple[Run, bool]:
         if project.archived_at is not None:
             raise ConflictError("Cannot create a run for an archived project")
+        execution_mode = command.execution_mode or "legacy"
+        if execution_mode == "dynamic_parallel":
+            raise ConflictError(
+                "dynamic_parallel is reserved until shared workspaces and conflict-safe merges are enabled"
+            )
         if command.idempotency_key:
             existing = await self.runs.find_idempotent(
                 project.id, command.idempotency_key
@@ -54,6 +61,7 @@ class RunService:
             retry_of_id=retry_of_id,
             request=command.request.strip(),
             target_stack=command.target_stack,
+            execution_mode=execution_mode,
             clarification_gate_enabled=command.clarification_gate_enabled,
             idempotency_key=command.idempotency_key,
             status="queued",
@@ -67,7 +75,10 @@ class RunService:
             "run_queued",
             "queued",
             "Run accepted and awaiting durable dispatch",
-            {"target_stack": run.target_stack},
+            {
+                "target_stack": run.target_stack,
+                "execution_mode": run.execution_mode,
+            },
         )
         self._add_outbox(run.id, resume=False)
         try:
@@ -108,6 +119,18 @@ class RunService:
         run = await self.require(run_id, for_update=True)
         if not can_resume(run.status):
             raise ConflictError("Only failed, cancelled, or paused runs can be resumed")
+        if run.execution_mode != "legacy":
+            failed_task_id = await self.session.scalar(
+                select(RunTask.id).where(
+                    RunTask.run_id == run.id,
+                    RunTask.status == "failed",
+                )
+            )
+            if failed_task_id is not None:
+                raise ConflictError(
+                    "This dynamic run has a failed feature task; retry that task "
+                    "with POST /api/v1/runs/{run_id}/tasks/{task_id}/retry"
+                )
         run.status = "queued"
         run.phase = "queued"
         run.error_type = None

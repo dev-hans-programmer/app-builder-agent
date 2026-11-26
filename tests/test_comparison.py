@@ -13,7 +13,9 @@ def test_comparison_request_supports_reasoning_models(monkeypatch):
         model="test-sol-model",
         choices=[
             SimpleNamespace(
-                message=SimpleNamespace(content="# Analysis\nBoth implementations work.")
+                message=SimpleNamespace(
+                    content="# Analysis\nBoth implementations work."
+                )
             )
         ],
         usage=None,

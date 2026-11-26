@@ -11,7 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict
 
-from src.agents.executor import _find_spec_node, _safe_resolve_path, write_json_safely, write_text_safely
+from src.agents.executor import (
+    _find_spec_node,
+    _safe_resolve_path,
+    write_json_safely,
+    write_text_safely,
+)
 from src.graph.runtime import ensure_workspace_layout, persist_job_checkpoint
 from src.graph.state import BuilderState
 
@@ -36,16 +41,12 @@ def _execution_paths(
 
 def _verification_paths(manifest: Dict[str, str], job_id: str) -> tuple[Path]:
     verification_dir = Path(manifest["verification_dir"])
-    return (
-        verification_dir / "verification.md",
-    )
+    return (verification_dir / "verification.md",)
 
 
 def _repair_paths(manifest: Dict[str, str], job_id: str) -> tuple[Path]:
     repairs_dir = Path(manifest["repairs_dir"])
-    return (
-        repairs_dir / "repair.md",
-    )
+    return (repairs_dir / "repair.md",)
 
 
 def _build_check(name: str, passed: bool, details: str) -> Dict[str, Any]:
@@ -80,7 +81,13 @@ def build_verification_result(state: BuilderState) -> Dict[str, Any]:
     project_name = state["project_name"]
     spec_node = _find_spec_node(spec_tree, current_spec_id) if current_spec_id else None
 
-    summary_json_path, summary_md_path, trace_json_path, trace_md_path, checkpoint_path = _execution_paths(
+    (
+        summary_json_path,
+        summary_md_path,
+        trace_json_path,
+        trace_md_path,
+        checkpoint_path,
+    ) = _execution_paths(
         manifest,
         project_name,
         current_spec_id,
@@ -91,17 +98,33 @@ def build_verification_result(state: BuilderState) -> Dict[str, Any]:
     checks: list[Dict[str, Any]] = []
     missing_artifacts: list[str] = []
 
-    summary_json_exists = _safe_resolve_path(manifest["workspace_root"], summary_json_path).exists()
-    summary_md_exists = _safe_resolve_path(manifest["workspace_root"], summary_md_path).exists()
-    trace_json_exists = _safe_resolve_path(manifest["workspace_root"], trace_json_path).exists()
-    trace_md_exists = _safe_resolve_path(manifest["workspace_root"], trace_md_path).exists()
+    summary_json_exists = _safe_resolve_path(
+        manifest["workspace_root"], summary_json_path
+    ).exists()
+    summary_md_exists = _safe_resolve_path(
+        manifest["workspace_root"], summary_md_path
+    ).exists()
+    trace_json_exists = _safe_resolve_path(
+        manifest["workspace_root"], trace_json_path
+    ).exists()
+    trace_md_exists = _safe_resolve_path(
+        manifest["workspace_root"], trace_md_path
+    ).exists()
     checkpoint_exists = checkpoint_path.exists()
 
-    checks.append(_build_check("summary.json exists", summary_json_exists, str(summary_json_path)))
-    checks.append(_build_check("summary.md exists", summary_md_exists, str(summary_md_path)))
-    checks.append(_build_check("trace.json exists", trace_json_exists, str(trace_json_path)))
+    checks.append(
+        _build_check("summary.json exists", summary_json_exists, str(summary_json_path))
+    )
+    checks.append(
+        _build_check("summary.md exists", summary_md_exists, str(summary_md_path))
+    )
+    checks.append(
+        _build_check("trace.json exists", trace_json_exists, str(trace_json_path))
+    )
     checks.append(_build_check("trace.md exists", trace_md_exists, str(trace_md_path)))
-    checks.append(_build_check("checkpoint exists", checkpoint_exists, str(checkpoint_path)))
+    checks.append(
+        _build_check("checkpoint exists", checkpoint_exists, str(checkpoint_path))
+    )
 
     if not summary_json_exists:
         missing_artifacts.append("summary.json")
@@ -115,7 +138,9 @@ def build_verification_result(state: BuilderState) -> Dict[str, Any]:
         missing_artifacts.append("checkpoint.json")
 
     if spec_node and summary_md_exists:
-        summary_text = _safe_resolve_path(manifest["workspace_root"], summary_md_path).read_text(encoding="utf-8")
+        summary_text = _safe_resolve_path(
+            manifest["workspace_root"], summary_md_path
+        ).read_text(encoding="utf-8")
         checks.append(
             _build_check(
                 "summary references spec title",
@@ -124,10 +149,26 @@ def build_verification_result(state: BuilderState) -> Dict[str, Any]:
             )
         )
     else:
-        checks.append(_build_check("summary references spec title", False, "summary.md missing or spec missing"))
+        checks.append(
+            _build_check(
+                "summary references spec title",
+                False,
+                "summary.md missing or spec missing",
+            )
+        )
 
     passed = all(check["passed"] for check in checks)
-    failure_category = "none" if passed else classify_failure({"status": "failed", "spec_id": current_spec_id, "missing_artifacts": missing_artifacts})
+    failure_category = (
+        "none"
+        if passed
+        else classify_failure(
+            {
+                "status": "failed",
+                "spec_id": current_spec_id,
+                "missing_artifacts": missing_artifacts,
+            }
+        )
+    )
 
     return {
         "spec_id": current_spec_id,
@@ -205,14 +246,18 @@ def persist_repair_result(
     }
 
 
-def _repair_spec_artifacts(state: BuilderState, verification_result: Dict[str, Any]) -> list[str]:
+def _repair_spec_artifacts(
+    state: BuilderState, verification_result: Dict[str, Any]
+) -> list[str]:
     """Repair missing execution artifacts using the current spec."""
     manifest = state.get("artifacts") or ensure_workspace_layout(
         ".",
         project_name=state.get("project_name"),
     )
     spec_tree = state.get("spec_tree") or {}
-    current_spec_id = state.get("current_spec_id") or verification_result.get("spec_id") or ""
+    current_spec_id = (
+        state.get("current_spec_id") or verification_result.get("spec_id") or ""
+    )
     spec_node = _find_spec_node(spec_tree, current_spec_id) if current_spec_id else None
     project_name = state["project_name"]
     repaired_files: list[str] = []
@@ -220,7 +265,13 @@ def _repair_spec_artifacts(state: BuilderState, verification_result: Dict[str, A
     if not spec_node:
         return repaired_files
 
-    summary_json_path, summary_md_path, trace_json_path, trace_md_path, checkpoint_path = _execution_paths(
+    (
+        summary_json_path,
+        summary_md_path,
+        trace_json_path,
+        trace_md_path,
+        checkpoint_path,
+    ) = _execution_paths(
         manifest,
         project_name,
         current_spec_id,
@@ -268,18 +319,26 @@ def _repair_spec_artifacts(state: BuilderState, verification_result: Dict[str, A
     )
 
     if "summary.json" in verification_result.get("missing_artifacts", []):
-        result = write_json_safely(manifest["workspace_root"], summary_json_path, summary_payload)
+        result = write_json_safely(
+            manifest["workspace_root"], summary_json_path, summary_payload
+        )
         if result["changed"]:
             repaired_files.append(result["path"])
     if "summary.md" in verification_result.get("missing_artifacts", []):
-        result = write_text_safely(manifest["workspace_root"], summary_md_path, summary_md)
+        result = write_text_safely(
+            manifest["workspace_root"], summary_md_path, summary_md
+        )
         if result["changed"]:
             repaired_files.append(result["path"])
     if "trace.json" in verification_result.get("missing_artifacts", []):
         result = write_json_safely(
             manifest["workspace_root"],
             trace_json_path,
-            {"job_id": state["job_id"], "current_spec_id": current_spec_id, "trace": state.get("execution_trace", [])},
+            {
+                "job_id": state["job_id"],
+                "current_spec_id": current_spec_id,
+                "trace": state.get("execution_trace", []),
+            },
         )
         if result["changed"]:
             repaired_files.append(result["path"])
@@ -310,12 +369,16 @@ def verify_execution(state: BuilderState) -> Dict[str, Any]:
         project_name=state.get("project_name"),
     )
     verification_result = build_verification_result(state)
-    verification_paths = persist_verification_result(verification_result, manifest, state["job_id"])
+    verification_paths = persist_verification_result(
+        verification_result, manifest, state["job_id"]
+    )
     verification_entry = {
         **verification_result,
         "verification_paths": verification_paths,
     }
-    verification_results = list(state.get("verification_results", [])) + [verification_entry]
+    verification_results = list(state.get("verification_results", [])) + [
+        verification_entry
+    ]
 
     updates = {
         "verification_results": verification_results,
@@ -323,7 +386,11 @@ def verify_execution(state: BuilderState) -> Dict[str, Any]:
         "current_phase": "verification",
         "artifacts": manifest,
         "failed_specs": list(state.get("failed_specs", []))
-        + ([] if verification_result["passed"] else [verification_result.get("spec_id", "")]),
+        + (
+            []
+            if verification_result["passed"]
+            else [verification_result.get("spec_id", "")]
+        ),
     }
     updates["checkpoint_path"] = str(
         persist_job_checkpoint({**state, **updates}, manifest, suffix="verification")
@@ -338,7 +405,11 @@ def repair_execution(state: BuilderState) -> Dict[str, Any]:
         project_name=state.get("project_name"),
     )
     verification_history = list(state.get("verification_results", []))
-    latest = verification_history[-1] if verification_history else build_verification_result(state)
+    latest = (
+        verification_history[-1]
+        if verification_history
+        else build_verification_result(state)
+    )
 
     if latest.get("passed"):
         repair_result = {
@@ -361,7 +432,9 @@ def repair_execution(state: BuilderState) -> Dict[str, Any]:
 
     repaired_files = _repair_spec_artifacts(state, latest)
     repaired_verification = build_verification_result(state)
-    verification_paths = persist_verification_result(repaired_verification, manifest, state["job_id"])
+    verification_paths = persist_verification_result(
+        repaired_verification, manifest, state["job_id"]
+    )
     repair_result = {
         "status": "repaired" if repaired_verification.get("passed") else "blocked",
         "spec_id": repaired_verification.get("spec_id", ""),
@@ -374,7 +447,10 @@ def repair_execution(state: BuilderState) -> Dict[str, Any]:
 
     repaired_history = list(state.get("repair_history", [])) + [repair_result]
     failed_specs = list(state.get("failed_specs", []))
-    if not repaired_verification.get("passed") and repaired_verification.get("spec_id") not in failed_specs:
+    if (
+        not repaired_verification.get("passed")
+        and repaired_verification.get("spec_id") not in failed_specs
+    ):
         failed_specs.append(repaired_verification.get("spec_id", ""))
 
     updates = {

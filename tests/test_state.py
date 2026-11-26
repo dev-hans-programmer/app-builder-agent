@@ -214,7 +214,9 @@ class TestValidateState:
             nodejs_build_time=None,
         )
         errors = validate_state(state)
-        assert len(errors) >= 3  # Should catch empty prompt, invalid name, invalid timestamp
+        assert (
+            len(errors) >= 3
+        )  # Should catch empty prompt, invalid name, invalid timestamp
 
     def test_invalid_clarification_answers_caught(self):
         """Test that clarification answers must be a dictionary."""

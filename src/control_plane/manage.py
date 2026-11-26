@@ -56,10 +56,7 @@ async def delete_all_database_data() -> list[str]:
                 f"{quote(schema)}.{quote(table)}" for table in tables
             )
             await connection.execute(
-                text(
-                    f"TRUNCATE TABLE {qualified_tables} "
-                    "RESTART IDENTITY CASCADE"
-                )
+                text(f"TRUNCATE TABLE {qualified_tables} RESTART IDENTITY CASCADE")
             )
             return tables
     finally:
@@ -83,9 +80,7 @@ def confirm_database_deletion(database_url: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "command", choices=("setup-checkpoints", "delete-all-data")
-    )
+    parser.add_argument("command", choices=("setup-checkpoints", "delete-all-data"))
     parser.add_argument(
         "--yes",
         action="store_true",

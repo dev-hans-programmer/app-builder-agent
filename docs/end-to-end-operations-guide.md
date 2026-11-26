@@ -35,6 +35,7 @@ Use the following ownership rules during an investigation:
 | What is the public status of a run? | Run API or PostgreSQL `runs` |
 | Which step is running or failed? | Run API, `run_steps`, and `run_events` |
 | Is work waiting for or held by a worker? | RabbitMQ `runs` queue |
+| Is a dynamic feature task waiting or active? | RabbitMQ `run_tasks` queue and run task APIs |
 | Is the scheduler/dispatcher operating? | Celery Beat log, maintenance worker log, and `outbox_messages` |
 | What is the worker doing now? | Celery worker log and Celery Inspect |
 | What files and reports were generated? | Run artifacts API and `CONTROL_ARTIFACT_ROOT` |
@@ -140,21 +141,30 @@ Terminal 2 — worker:
 make run-worker
 ```
 
+The standard worker consumes `runs`, `run_tasks`, and `maintenance`. Dynamic Python runs expose:
+
+```bash
+curl -s "$API_BASE/api/v1/runs/$RUN_ID/tasks" | jq
+curl -s "$API_BASE/api/v1/runs/$RUN_ID/tasks/$TASK_ID/attempts" | jq
+curl -X POST "$API_BASE/api/v1/runs/$RUN_ID/tasks/$TASK_ID/retry"
+```
+
 Terminal 3 — scheduler:
 
 ```bash
 make run-beat
 ```
 
-The standard worker consumes both `runs` and `maintenance`. For a larger deployment, run generation
-and maintenance independently; `make run-maintenance-worker` starts a maintenance-only worker.
+The standard worker consumes `runs`, `run_tasks`, and `maintenance`. For a larger deployment, run
+generation and maintenance independently; `make run-maintenance-worker` starts a maintenance-only
+worker.
 
 What each process does:
 
 | Process | Responsibility | Expected startup evidence |
 |---|---|---|
 | FastAPI | Accept requests and serve run state/events/artifacts | Uvicorn listening on `127.0.0.1:8080` |
-| Celery worker | Dispatch outbox records, execute runs, recover stale runs | Worker reports `celery@... ready` and lists `runs,maintenance` |
+| Celery worker | Dispatch outbox records, execute runs/tasks, recover stale leases | Worker reports `celery@... ready` and lists `runs,run_tasks,maintenance` |
 | Celery Beat | Schedule outbox dispatch every second and stale recovery every 60 seconds | Beat reports that it has started |
 
 If the API log repeatedly says `WatchFiles detected changes` for paths under `data/projects`, it was
@@ -547,12 +557,19 @@ Workers use late acknowledgement and a prefetch multiplier of one. Consequently,
 generation remains `Unacked` for minutes; that is expected. If a worker dies, RabbitMQ can redeliver
 the unacknowledged task.
 
-### 9.2 `maintenance` queue
+### 9.2 `run_tasks` queue
+
+Dynamic Python feature tasks appear here after their dependencies succeed. In `dynamic_serial`, a
+run contributes at most one Ready/Unacked task at a time. Inspect the task APIs for durable status;
+RabbitMQ only shows delivery state.
+
+### 9.3 `maintenance` queue
 
 This queue carries:
 
 - `control_plane.dispatch_outbox`, scheduled every second
 - `control_plane.recover_stale_runs`, scheduled every 60 seconds
+- `control_plane.recover_stale_run_tasks`, scheduled every 60 seconds
 
 Its Ready count should remain near zero and it should have a consumer. A steadily growing Ready
 count indicates that no worker is consuming maintenance work or all available worker slots are

@@ -11,7 +11,13 @@ from src.control_plane.config import ControlPlaneSettings
 from src.control_plane.infrastructure.artifacts import LocalArtifactStore
 from src.control_plane.infrastructure.database import Base, build_session_factory
 from src.control_plane.infrastructure.database import models  # noqa: F401
-from src.control_plane.infrastructure.database.models import OutboxMessage, RunEvent
+from src.control_plane.infrastructure.database.models import (
+    OutboxMessage,
+    Run,
+    RunEvent,
+    RunTask,
+    RunTaskAttempt,
+)
 from src.control_plane.queue import celery_app
 from src.control_plane.tasks import _failure_from_state
 
@@ -111,7 +117,7 @@ def test_project_run_lifecycle_and_durable_outbox(tmp_path: Path) -> None:
     asyncio.run(assert_outbox())
 
 
-def test_api_surface_has_the_promised_nineteen_operations(tmp_path: Path) -> None:
+def test_api_surface_includes_run_task_operations(tmp_path: Path) -> None:
     app, _, _ = _test_app(tmp_path)
     operations = [
         (method.upper(), path)
@@ -119,7 +125,86 @@ def test_api_surface_has_the_promised_nineteen_operations(tmp_path: Path) -> Non
         for method in item
         if method in {"get", "post", "patch", "delete"}
     ]
-    assert len(operations) == 19
+    assert len(operations) == 23
+    assert ("GET", "/api/v1/runs/{run_id}/tasks") in operations
+    assert ("POST", "/api/v1/runs/{run_id}/tasks/{task_id}/retry") in operations
+
+
+def test_run_task_projection_attempts_and_manual_retry(tmp_path: Path) -> None:
+    app, session_factory, _ = _test_app(tmp_path)
+    with TestClient(app) as client:
+        project = client.post("/api/v1/projects", json={"name": "Tasks"}).json()
+        run = client.post(
+            f"/api/v1/projects/{project['id']}/runs",
+            json={"request": "Build task API", "execution_mode": "dynamic_serial"},
+        ).json()
+
+        async def add_failed_task() -> str:
+            from uuid import UUID
+
+            async with session_factory() as session:
+                task = RunTask(
+                    run_id=UUID(run["id"]),
+                    task_key="feature-posts-01",
+                    plan_task_id="PY-TASK-003",
+                    kind="feature",
+                    title="Posts",
+                    objective="Implement posts",
+                    status="failed",
+                    sequence=3,
+                    attempt_count=1,
+                    max_attempts=1,
+                    acceptance_criteria_ids=["AC-001"],
+                )
+                session.add(task)
+                await session.flush()
+                session.add(
+                    RunTaskAttempt(
+                        task_id=task.id,
+                        attempt=1,
+                        status="failed",
+                        error_type="TaskVerificationError",
+                        error_message="lint failed",
+                    )
+                )
+                persisted_run = await session.get(Run, task.run_id)
+                assert persisted_run is not None
+                persisted_run.status = "failed"
+                persisted_run.phase = "failed"
+                await session.commit()
+                return str(task.id)
+
+        task_id = asyncio.run(add_failed_task())
+        tasks = client.get(f"/api/v1/runs/{run['id']}/tasks")
+        assert tasks.status_code == 200
+        assert tasks.json()[0]["task_key"] == "feature-posts-01"
+        attempts = client.get(f"/api/v1/runs/{run['id']}/tasks/{task_id}/attempts")
+        assert attempts.status_code == 200
+        assert attempts.json()[0]["error_type"] == "TaskVerificationError"
+        resumed = client.post(f"/api/v1/runs/{run['id']}/resume")
+        assert resumed.status_code == 409
+        assert "failed feature task" in resumed.json()["error"]["message"]
+        retried = client.post(f"/api/v1/runs/{run['id']}/tasks/{task_id}/retry")
+        assert retried.status_code == 202
+        assert retried.json()["status"] == "queued"
+
+
+def test_dynamic_parallel_is_rejected_until_workspace_isolation_exists(
+    tmp_path: Path,
+) -> None:
+    app, _, _ = _test_app(tmp_path)
+    with TestClient(app) as client:
+        project = client.post("/api/v1/projects", json={"name": "Parallel"}).json()
+        response = client.post(
+            f"/api/v1/projects/{project['id']}/runs",
+            json={
+                "request": "Build an API",
+                "execution_mode": "dynamic_parallel",
+            },
+        )
+
+    assert response.status_code == 409
+    assert "conflict-safe merges" in response.json()["error"]["message"]
 
 
 def test_local_artifact_store_is_run_isolated_and_traversal_safe(

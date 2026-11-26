@@ -278,7 +278,9 @@ def comparison_placeholder(state: BuilderState) -> dict:
     }
 
 
-def create_workflow(*, checkpointer=None) -> StateGraph:
+def create_workflow(
+    *, checkpointer=None, interrupt_after: list[str] | None = None
+) -> StateGraph:
     """
     Create and compile the LangGraph workflow.
 
@@ -454,4 +456,7 @@ def create_workflow(*, checkpointer=None) -> StateGraph:
     workflow.add_edge("generate_report", END)
 
     # Compile and return
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile(
+        checkpointer=checkpointer,
+        interrupt_after=interrupt_after,
+    )
