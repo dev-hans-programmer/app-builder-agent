@@ -3,6 +3,17 @@
 Successful queued runs can publish generated code directly to a repository owned by the configured
 GitHub user. No local Git repository or credential-bearing remote is created.
 
+By default, publishing requires successful quality and traceability gates. To publish generated
+code even when the final quality gate fails, set:
+
+```bash
+CONTROL_PUBLISH_ON_QUALITY_FAILURE=true
+```
+
+This escape hatch only applies when every selected builder produced code successfully. The run
+remains failed, preserving the quality diagnostics, while GitHub delivery is attempted normally.
+Cancellation and incomplete generation are never published.
+
 ## Configuration
 
 ```env

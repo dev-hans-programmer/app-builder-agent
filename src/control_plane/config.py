@@ -27,6 +27,7 @@ class ControlPlaneSettings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     artifact_root: Path = Path("./data")
     retain_local_builds: bool = True
+    publish_on_quality_failure: bool = False
     api_host: str = "127.0.0.1"
     api_port: int = 8080
     api_key: str | None = None

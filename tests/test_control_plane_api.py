@@ -19,7 +19,10 @@ from src.control_plane.infrastructure.database.models import (
     RunTaskAttempt,
 )
 from src.control_plane.queue import celery_app
-from src.control_plane.tasks import _failure_from_state
+from src.control_plane.tasks import (
+    _failure_from_state,
+    _should_attempt_github_delivery,
+)
 
 
 def _test_app(tmp_path: Path):
@@ -50,6 +53,38 @@ def _test_app(tmp_path: Path):
         session_factory,
         store,
     )
+
+
+def test_quality_failure_delivery_is_explicit_and_requires_generated_code() -> None:
+    failed_quality_state = {
+        "job_status": "failed",
+        "target_stack": "python",
+        "python_output": {"status": "success"},
+        "quality_results": {"passed": False},
+    }
+
+    assert not _should_attempt_github_delivery(
+        failed_quality_state, publish_on_quality_failure=False
+    )
+    assert _should_attempt_github_delivery(
+        failed_quality_state, publish_on_quality_failure=True
+    )
+    assert not _should_attempt_github_delivery(
+        {**failed_quality_state, "python_output": {"status": "failed"}},
+        publish_on_quality_failure=True,
+    )
+
+
+def test_non_quality_failures_are_not_published_by_escape_hatch() -> None:
+    state = {
+        "job_status": "failed",
+        "target_stack": "python",
+        "python_output": {"status": "success"},
+        "quality_results": {"passed": True},
+        "traceability_result": {"passed": False},
+    }
+
+    assert not _should_attempt_github_delivery(state, publish_on_quality_failure=True)
 
 
 def test_project_run_lifecycle_and_durable_outbox(tmp_path: Path) -> None:

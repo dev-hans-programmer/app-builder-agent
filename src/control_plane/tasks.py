@@ -252,7 +252,10 @@ async def _execute_run(run_id: UUID, task_id: str, *, resume: bool) -> str:
             await _record_postprocessing_failure(run.id, "artifact_index_failed", error)
             if final_state.get("job_status") == "completed":
                 raise
-        if final_state.get("job_status") == "completed":
+        if _should_attempt_github_delivery(
+            final_state,
+            publish_on_quality_failure=settings.publish_on_quality_failure,
+        ):
             published = await github_delivery.deliver(
                 run_id=run.id,
                 project=project,
@@ -508,7 +511,11 @@ def _refresh_task_patch_hashes(output: dict[str, Any]) -> None:
     for patch in output.get("patches") or []:
         relative_path = str(patch.get("path") or "")
         candidate = (output_dir / relative_path).resolve()
-        if not relative_path or output_dir not in candidate.parents or not candidate.is_file():
+        if (
+            not relative_path
+            or output_dir not in candidate.parents
+            or not candidate.is_file()
+        ):
             continue
         patch["sha256_after"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
         patches_by_path[relative_path] = patch
@@ -763,7 +770,10 @@ async def _finalize_dynamic_run(run_id: UUID, queue_task_id: str) -> str:
             await _record_postprocessing_failure(run_id, "artifact_index_failed", error)
             if final_state.get("job_status") == "completed":
                 raise
-        if final_state.get("job_status") == "completed":
+        if _should_attempt_github_delivery(
+            final_state,
+            publish_on_quality_failure=settings.publish_on_quality_failure,
+        ):
             published = await github_delivery.deliver(
                 run_id=run_id,
                 project=project,
@@ -865,6 +875,30 @@ async def _finalize_from_state(run_id: UUID, state: dict[str, Any]) -> None:
         if status == "failed" and not run.error_message:
             run.error_type, run.error_message = _failure_from_state(state)
         await session.commit()
+
+
+def _should_attempt_github_delivery(
+    state: dict[str, Any], *, publish_on_quality_failure: bool
+) -> bool:
+    """Allow opted-in delivery of generated code that failed quality checks."""
+    if state.get("job_status") == "completed":
+        return True
+    if not publish_on_quality_failure or state.get("job_status") != "failed":
+        return False
+
+    quality = state.get("quality_results") or {}
+    if quality.get("passed") is not False:
+        return False
+
+    target_stack = state.get("target_stack", "both")
+    selected_outputs = []
+    if target_stack in {"python", "both"}:
+        selected_outputs.append(state.get("python_output") or {})
+    if target_stack in {"nodejs", "both"}:
+        selected_outputs.append(state.get("nodejs_output") or {})
+    return bool(selected_outputs) and all(
+        output.get("status") == "success" for output in selected_outputs
+    )
 
 
 def _failure_from_state(state: dict[str, Any]) -> tuple[str, str]:
