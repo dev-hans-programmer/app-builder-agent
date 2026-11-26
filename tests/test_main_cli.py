@@ -4,7 +4,6 @@ Tests for the CLI entrypoint.
 
 from io import StringIO
 import runpy
-from pathlib import Path
 from types import SimpleNamespace
 
 from rich.console import Console
@@ -26,12 +25,15 @@ def test_parse_args_supports_status_and_resume():
     status_args = cli.parse_args(["--status"])
     resume_args = cli.parse_args(["--resume", "checkpoints/job.json"])
     disabled_args = cli.parse_args(["--no-clarification-gate"])
+    python_args = cli.parse_args(["--stack", "python"])
 
     assert status_args.status is True
     assert status_args.resume is None
     assert resume_args.resume == "checkpoints/job.json"
     assert resume_args.status is None
     assert disabled_args.no_clarification_gate is True
+    assert disabled_args.stack == "both"
+    assert python_args.stack == "python"
 
 
 def test_check_environment_handles_missing_and_present_key(monkeypatch):
@@ -339,14 +341,15 @@ def test_run_build_flow_uses_workflow(monkeypatch):
     monkeypatch.setattr(
         cli,
         "create_initial_state",
-        lambda user_prompt, project_name, clarification_gate_enabled=True: create_initial_state(
+        lambda user_prompt, project_name, clarification_gate_enabled=True, target_stack="both": create_initial_state(
             user_prompt,
             project_name,
             clarification_gate_enabled=clarification_gate_enabled,
+            target_stack=target_stack,
         ),
     )
     monkeypatch.setattr(cli, "create_workflow", lambda: fake_workflow)
-    monkeypatch.setattr(cli, "display_phase1_start", lambda: None)
+    monkeypatch.setattr(cli, "display_phase1_start", lambda target_stack="both": None)
     monkeypatch.setattr(cli, "display_results", lambda state: None)
     monkeypatch.setattr(cli.console, "print", lambda *args, **kwargs: None)
 
@@ -365,14 +368,15 @@ def test_run_build_flow_handles_none_outputs(monkeypatch):
     monkeypatch.setattr(
         cli,
         "create_initial_state",
-        lambda user_prompt, project_name, clarification_gate_enabled=True: create_initial_state(
+        lambda user_prompt, project_name, clarification_gate_enabled=True, target_stack="both": create_initial_state(
             user_prompt,
             project_name,
             clarification_gate_enabled=clarification_gate_enabled,
+            target_stack=target_stack,
         ),
     )
     monkeypatch.setattr(cli, "create_workflow", lambda: fake_workflow)
-    monkeypatch.setattr(cli, "display_phase1_start", lambda: None)
+    monkeypatch.setattr(cli, "display_phase1_start", lambda target_stack="both": None)
     monkeypatch.setattr(cli, "display_results", lambda state: None)
     monkeypatch.setattr(cli.console, "print", lambda *args, **kwargs: None)
 
@@ -397,14 +401,15 @@ def test_run_build_flow_shows_paused_notice(monkeypatch):
     monkeypatch.setattr(
         cli,
         "create_initial_state",
-        lambda user_prompt, project_name, clarification_gate_enabled=True: create_initial_state(
+        lambda user_prompt, project_name, clarification_gate_enabled=True, target_stack="both": create_initial_state(
             user_prompt,
             project_name,
             clarification_gate_enabled=clarification_gate_enabled,
+            target_stack=target_stack,
         ),
     )
     monkeypatch.setattr(cli, "create_workflow", lambda: fake_workflow)
-    monkeypatch.setattr(cli, "display_phase1_start", lambda: None)
+    monkeypatch.setattr(cli, "display_phase1_start", lambda target_stack="both": None)
     monkeypatch.setattr(cli, "display_results", lambda state: None)
     monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=140))
 
@@ -423,9 +428,9 @@ def test_run_build_flow_can_disable_clarification_gate(monkeypatch):
     monkeypatch.setattr(cli, "display_banner", lambda: None)
     monkeypatch.setattr(cli, "check_environment", lambda: True)
     monkeypatch.setattr(cli, "get_user_input", lambda: ("Build API", "demo"))
-    monkeypatch.setattr(cli, "create_initial_state", lambda user_prompt, project_name, clarification_gate_enabled=True: create_initial_state(user_prompt, project_name, clarification_gate_enabled=clarification_gate_enabled))
+    monkeypatch.setattr(cli, "create_initial_state", lambda user_prompt, project_name, clarification_gate_enabled=True, target_stack="both": create_initial_state(user_prompt, project_name, clarification_gate_enabled=clarification_gate_enabled, target_stack=target_stack))
     monkeypatch.setattr(cli, "create_workflow", lambda: fake_workflow)
-    monkeypatch.setattr(cli, "display_phase1_start", lambda: None)
+    monkeypatch.setattr(cli, "display_phase1_start", lambda target_stack="both": None)
     monkeypatch.setattr(cli, "display_results", lambda state: None)
     monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=140))
 
@@ -455,10 +460,19 @@ def test_main_resume_branch(monkeypatch):
 
 
 def test_main_build_branch(monkeypatch):
-    monkeypatch.setattr(cli, "parse_args", lambda argv=None: SimpleNamespace(status=None, resume=None, no_clarification_gate=False))
-    monkeypatch.setattr(cli, "_run_build_flow", lambda *, clarification_gate_enabled=True: 0)
+    monkeypatch.setattr(cli, "parse_args", lambda argv=None: SimpleNamespace(status=None, resume=None, no_clarification_gate=False, stack="python"))
+    captured = {}
+    monkeypatch.setattr(
+        cli,
+        "_run_build_flow",
+        lambda *, clarification_gate_enabled=True, target_stack="both": captured.update(
+            clarification_gate_enabled=clarification_gate_enabled,
+            target_stack=target_stack,
+        ) or 0,
+    )
 
     assert cli.main([]) == 0
+    assert captured["target_stack"] == "python"
 
 
 def test_auto_flow_resumes_latest_incomplete_checkpoint(tmp_path, monkeypatch):

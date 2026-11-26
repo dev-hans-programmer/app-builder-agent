@@ -6,7 +6,7 @@ across all nodes in the LangGraph workflow. It also provides utility functions
 for state initialization, validation, and project name sanitization.
 """
 
-from typing import TypedDict, Optional, Dict, Any, List, Annotated, NotRequired
+from typing import TypedDict, Optional, Dict, Any, List, Annotated, Literal, NotRequired
 from datetime import datetime
 import operator
 import re
@@ -149,6 +149,7 @@ class BuilderState(TypedDict):
     errors: Annotated[List[str], operator.add]
     python_build_time: Optional[float]
     nodejs_build_time: Optional[float]
+    target_stack: NotRequired[Literal["python", "nodejs", "both"]]
     job_id: NotRequired[str]
     job_status: NotRequired[str]
     current_phase: NotRequired[str]
@@ -245,6 +246,7 @@ def create_initial_state(
     project_name: str,
     *,
     clarification_gate_enabled: Optional[bool] = None,
+    target_stack: Literal["python", "nodejs", "both"] = "both",
 ) -> BuilderState:
     """
     Create initial state with user input and default values.
@@ -273,6 +275,9 @@ def create_initial_state(
         >>> state["python_output"] is None
         True
     """
+    if target_stack not in {"python", "nodejs", "both"}:
+        raise ValueError("target_stack must be one of: python, nodejs, both")
+
     # Sanitize project name
     sanitized_name = sanitize_project_name(project_name)
     ensure_workspace_layout(".", project_name=sanitized_name)
@@ -293,6 +298,7 @@ def create_initial_state(
         errors=[],
         python_build_time=None,
         nodejs_build_time=None,
+        target_stack=target_stack,
         job_id=job_metadata["job_id"],
         job_status=job_metadata["job_status"],
         current_phase=job_metadata["current_phase"],
@@ -392,6 +398,9 @@ def validate_state(state: BuilderState) -> List[str]:
     ):
         errors.append("clarification_answers must be a dictionary")
 
+    if state.get("target_stack", "both") not in {"python", "nodejs", "both"}:
+        errors.append("target_stack must be one of: python, nodejs, both")
+
     if state.get("execution_plan") is not None and not isinstance(state["execution_plan"], dict):
         errors.append("execution_plan must be a dictionary")
 
@@ -410,6 +419,7 @@ def create_job_state(
     input_type: str = "prompt",
     *,
     clarification_gate_enabled: Optional[bool] = None,
+    target_stack: Literal["python", "nodejs", "both"] = "both",
 ) -> BuilderState:
     """
     Compatibility helper for creating a fresh job state.
@@ -421,6 +431,7 @@ def create_job_state(
         user_prompt,
         project_name,
         clarification_gate_enabled=clarification_gate_enabled,
+        target_stack=target_stack,
     )
     state["input_type"] = input_type
     state["raw_request"] = user_prompt

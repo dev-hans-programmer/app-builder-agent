@@ -14,7 +14,7 @@ The agent turns a requirement description or PRD into:
 - a resumable checkpointed workflow
 - a final report
 
-It generates two backend implementations:
+By default it generates two backend implementations:
 
 - Python with FastAPI
 - Node.js with Express
@@ -42,6 +42,17 @@ Run the agent from the project root:
 ```bash
 uv run python main.py
 ```
+
+Select a single implementation when you do not need a cross-stack comparison:
+
+```bash
+uv run python main.py --stack python
+uv run python main.py --stack nodejs
+```
+
+Supported values are `python`, `nodejs`, and `both`. The default is `both`.
+Single-stack jobs skip the unselected builder and the comparison model call.
+The selected value is stored in job state and retained when the job resumes.
 
 The CLI will prompt you for two inputs every time you start a fresh run:
 
@@ -93,8 +104,8 @@ The agent processes your request in stages:
 5. Execution planning
 6. Spec execution
 7. Verification and repair
-8. Code generation
-9. Comparison
+8. Code generation for the selected stack or stacks
+9. Comparison when `--stack both` is selected
 10. Final reporting
 
 If the job needs clarification, the workflow will ask in the terminal and then
@@ -104,15 +115,14 @@ continue immediately after the answers are entered.
 
 After a successful run, you will get:
 
-- generated Python backend code
-- generated Node.js backend code
+- generated backend code for the selected stack or stacks
 - requirement artifacts
 - architecture artifacts
 - spec artifacts
 - execution plans
 - verification reports
 - repair history
-- comparison report
+- comparison report for dual-stack jobs
 - checkpoint files
 - final delivery summary
 

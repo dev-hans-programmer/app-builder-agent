@@ -45,17 +45,24 @@ AI-powered agent that generates backend applications in both Python (FastAPI) an
    python main.py
    ```
 
+   Generate only one stack when a comparison is not needed:
+
+   ```bash
+   uv run python main.py --stack python
+   uv run python main.py --stack nodejs
+   ```
+
+   `--stack both` remains the default and runs both builders in parallel.
+
 ## Usage
 
 When you run the agent, you'll be prompted to:
 1. Describe the backend application you want to build
 2. Provide a project name
 
-The agent will then:
-1. Generate a Python/FastAPI implementation
-2. Generate a Node.js/Express implementation
-3. Compare both implementations
-4. Provide a detailed comparison report
+The agent will then generate the selected implementation. When `--stack both`
+is selected, it also compares the two implementations and provides a detailed
+comparison report.
 
 ### Example
 

@@ -44,3 +44,18 @@ class TestFinalReporter:
         assert summary_path.exists()
         assert checkpoint_path.exists()
         assert summary_path.read_text(encoding="utf-8").startswith("# Delivery Summary")
+
+    def test_single_stack_summary_marks_other_stack_not_requested(self, tmp_path):
+        state = create_initial_state(
+            "Build API",
+            "demo project",
+            target_stack="python",
+        )
+        state["artifacts"] = ensure_workspace_layout(tmp_path)
+        state["python_output"] = {"status": "success"}
+
+        summary = build_delivery_summary(state)
+
+        assert "**Target Stack**: python" in summary
+        assert "Python output: success" in summary
+        assert "Node.js output: not requested" in summary

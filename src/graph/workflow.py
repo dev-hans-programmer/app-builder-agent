@@ -38,6 +38,12 @@ def parse_input_node(state: BuilderState) -> BuilderState:
     if not state.get("project_name"):
         state["errors"].append("Project name is required")
 
+    # Checkpoints created before stack selection was introduced remain
+    # compatible and preserve the original dual-stack behavior.
+    state.setdefault("target_stack", "both")
+    if state["target_stack"] not in {"python", "nodejs", "both"}:
+        state["errors"].append("Target stack must be one of: python, nodejs, both")
+
     return state
 
 
@@ -72,18 +78,14 @@ def generate_report_node(state: BuilderState) -> BuilderState:
     reports_dir = Path(manifest["reports_dir"])
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate timestamped filename (sanitize colons and dots for filesystem)
-    timestamp = state["timestamp"].replace(":", "-").replace(".", "-")
-    filename = f"comparison-{timestamp}.md"
-    filepath = reports_dir / filename
-
     delivery_summary = build_delivery_summary(state)
-    report_content = state.get("comparison_report") or "# Comparison Report\n\nNo comparison report was generated."
-    report_content = f"{report_content}\n\n---\n\n{delivery_summary}"
-
-    # Write report to file if comparison report exists
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(report_content)
+    comparison_report = state.get("comparison_report")
+    if comparison_report:
+        timestamp = state["timestamp"].replace(":", "-").replace(".", "-")
+        filepath = reports_dir / f"comparison-{timestamp}.md"
+        report_content = f"{comparison_report}\n\n---\n\n{delivery_summary}"
+        filepath.write_text(report_content, encoding="utf-8")
+        state["artifacts"]["comparison_report_markdown"] = str(filepath)
 
     summary_paths = persist_delivery_summary(state)
     state["artifacts"] = state.get("artifacts", {})
@@ -113,6 +115,23 @@ def _route_after_clarification_gate(state: BuilderState) -> str:
     if not state.get("clarification_gate_enabled", True):
         return "architecture_planning"
     return "architecture_planning"
+
+
+def _route_to_builders(state: BuilderState) -> list[str]:
+    """Select one or both code-generation branches for this job."""
+    target_stack = state.get("target_stack", "both")
+    if target_stack == "python":
+        return ["python_builder"]
+    if target_stack == "nodejs":
+        return ["nodejs_builder"]
+    return ["python_builder", "nodejs_builder"]
+
+
+def _route_after_builder(state: BuilderState) -> str:
+    """Compare dual-stack builds; report single-stack builds directly."""
+    if state.get("target_stack", "both") == "both":
+        return "comparison"
+    return "generate_report"
 
 
 # Placeholder functions (will be replaced in Specs 004-006)
@@ -210,10 +229,9 @@ def create_workflow() -> StateGraph:
           ↓
         repair (patches failures if needed)
           ↓
-          ├─→ python_builder (parallel)
-          └─→ nodejs_builder (parallel)
+        selected builder(s)
           ↓
-        comparison (waits for both)
+        comparison (dual-stack jobs only)
           ↓
         generate_report (saves to disk)
           ↓
@@ -299,13 +317,27 @@ def create_workflow() -> StateGraph:
     workflow.add_edge("execution_engine", "verification")
     workflow.add_edge("verification", "repair")
 
-    # After repair, both builders run in parallel
-    workflow.add_edge("repair", "python_builder")
-    workflow.add_edge("repair", "nodejs_builder")
+    # Run only the requested builder branches. A list return value fans out both
+    # builders in the same superstep for dual-stack jobs.
+    workflow.add_conditional_edges(
+        "repair",
+        _route_to_builders,
+        {
+            "python_builder": "python_builder",
+            "nodejs_builder": "nodejs_builder",
+        },
+    )
 
-    # Both builders must complete before comparison
-    workflow.add_edge("python_builder", "comparison")
-    workflow.add_edge("nodejs_builder", "comparison")
+    # Comparison is meaningful only when both implementations were requested.
+    for builder_node in ("python_builder", "nodejs_builder"):
+        workflow.add_conditional_edges(
+            builder_node,
+            _route_after_builder,
+            {
+                "comparison": "comparison",
+                "generate_report": "generate_report",
+            },
+        )
 
     # After comparison, generate report
     workflow.add_edge("comparison", "generate_report")

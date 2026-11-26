@@ -23,6 +23,18 @@ def build_delivery_summary(state: Dict[str, Any]) -> str:
     artifacts = state.get("artifacts") or {}
     python_output = state.get("python_output") or {}
     nodejs_output = state.get("nodejs_output") or {}
+    target_stack = state.get("target_stack", "both")
+
+    python_status = (
+        python_output.get("status", "n/a")
+        if target_stack in {"python", "both"}
+        else "not requested"
+    )
+    nodejs_status = (
+        nodejs_output.get("status", "n/a")
+        if target_stack in {"nodejs", "both"}
+        else "not requested"
+    )
 
     last_verification = verification_results[-1] if verification_results else {}
     last_repair = repair_history[-1] if repair_history else {}
@@ -32,13 +44,14 @@ def build_delivery_summary(state: Dict[str, Any]) -> str:
         "",
         f"**Job ID**: {state.get('job_id', '')}",
         f"**Project**: {state.get('project_name', '')}",
+        f"**Target Stack**: {target_stack}",
         f"**Current Phase**: {state.get('current_phase', '')}",
         f"**Job Status**: {state.get('job_status', '')}",
         f"**Checkpoint**: {state.get('checkpoint_path', state.get('checkpoint_ref', ''))}",
         "",
         "## Build Outputs",
-        f"- Python output: {python_output.get('status', 'n/a')}",
-        f"- Node.js output: {nodejs_output.get('status', 'n/a')}",
+        f"- Python output: {python_status}",
+        f"- Node.js output: {nodejs_status}",
         "",
         "## Execution",
         f"- Ordered specs: {len(execution_plan.get('ordered_specs', []))}",

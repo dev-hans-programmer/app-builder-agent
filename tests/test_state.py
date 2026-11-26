@@ -74,6 +74,16 @@ class TestCreateInitialState:
         assert state["python_build_time"] is None
         assert state["nodejs_build_time"] is None
         assert state["clarification_gate_enabled"] is True
+        assert state["target_stack"] == "both"
+
+    def test_target_stack_can_be_selected(self):
+        state = create_initial_state("Test", "test", target_stack="python")
+
+        assert state["target_stack"] == "python"
+
+    def test_invalid_target_stack_is_rejected(self):
+        with pytest.raises(ValueError, match="target_stack"):
+            create_initial_state("Test", "test", target_stack="ruby")  # type: ignore[arg-type]
 
     def test_project_name_is_sanitized(self):
         """Test that project name is automatically sanitized."""
@@ -214,6 +224,14 @@ class TestValidateState:
         errors = validate_state(state)
 
         assert any("clarification_answers" in err for err in errors)
+
+    def test_invalid_target_stack_caught(self):
+        state = create_initial_state("Build API", "test-project")
+        state["target_stack"] = "ruby"  # type: ignore[assignment]
+
+        errors = validate_state(state)
+
+        assert any("target_stack" in err for err in errors)
 
     def test_invalid_execution_plan_caught(self):
         """Test that execution plan must be a dictionary."""

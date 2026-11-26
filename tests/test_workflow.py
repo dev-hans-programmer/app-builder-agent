@@ -28,6 +28,14 @@ class TestParseInputNode:
         result = parse_input_node(state)
         assert len(result["errors"]) == 0
 
+    def test_old_state_defaults_to_both_stacks(self):
+        state = create_initial_state("Build API", "test-project")
+        state.pop("target_stack")
+
+        result = parse_input_node(state)
+
+        assert result["target_stack"] == "both"
+
     def test_missing_prompt_adds_error(self):
         """Test that missing user_prompt adds error."""
         state = BuilderState(
@@ -141,6 +149,7 @@ class TestGenerateReportNode:
         result = generate_report_node(state)
         assert result is not None
         assert result["delivery_summary_markdown"]
+        assert not list(Path(result["artifacts"]["reports_dir"]).glob("comparison-*.md"))
 
 
 class TestCreateWorkflow:
@@ -262,6 +271,35 @@ class TestWorkflowExecution:
         assert final_state["execution_trace"] is not None
         assert final_state["verification_results"] is not None
         assert final_state["repair_history"] is not None
+
+    @pytest.mark.parametrize(
+        ("target_stack", "selected_output", "omitted_output"),
+        [
+            ("python", "python_output", "nodejs_output"),
+            ("nodejs", "nodejs_output", "python_output"),
+        ],
+    )
+    def test_single_stack_skips_other_builder_and_comparison(
+        self,
+        monkeypatch,
+        target_stack,
+        selected_output,
+        omitted_output,
+    ):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        state = create_initial_state(
+            "Build a secure API with authentication, a database, and deployment.",
+            f"{target_stack}-only-project",
+            target_stack=target_stack,
+        )
+
+        final_state = create_workflow().invoke(state)
+
+        assert final_state[selected_output]["status"] == "placeholder"
+        assert final_state[omitted_output] is None
+        assert final_state["comparison_report"] is None
+        assert final_state["target_stack"] == target_stack
+        assert final_state["job_status"] == "completed"
 
     def test_workflow_prompts_for_clarification_and_continues(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
