@@ -10,6 +10,7 @@ __pycache__/
 builds/
 reports/
 projects/
+data/
 
 # IDE
 .vscode/
@@ -27,5 +28,6 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
+celerybeat-schedule*
 *.py[cod]
 *$py.class

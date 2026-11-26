@@ -6,6 +6,7 @@ across all nodes in the LangGraph workflow. It also provides utility functions
 for state initialization, validation, and project name sanitization.
 """
 
+from pathlib import Path
 from typing import TypedDict, Optional, Dict, Any, List, Annotated, Literal, NotRequired
 from datetime import datetime
 import operator
@@ -257,6 +258,9 @@ def create_initial_state(
     *,
     clarification_gate_enabled: Optional[bool] = None,
     target_stack: Literal["python", "nodejs", "both"] = "both",
+    workspace_root: str | Path | None = None,
+    job_id: str | None = None,
+    run_id: str | None = None,
 ) -> BuilderState:
     """
     Create initial state with user input and default values.
@@ -293,12 +297,35 @@ def create_initial_state(
     job_metadata: JobMetadata = create_job_metadata(
         input_type="prompt",
         raw_request=user_prompt,
+        job_id=job_id,
+        run_id=run_id,
     )
-    artifact_manifest = ensure_workspace_layout(
-        ".",
-        project_name=sanitized_name,
-        run_id=job_metadata["run_id"],
-    )
+    if workspace_root is None:
+        artifact_manifest = ensure_workspace_layout(
+            ".",
+            project_name=sanitized_name,
+            run_id=job_metadata["run_id"],
+        )
+    else:
+        root = Path(workspace_root).resolve()
+        artifact_manifest = ensure_workspace_layout(root)
+        machine_dir = root / "_machine"
+        steps_dir = root / "steps"
+        machine_dir.mkdir(parents=True, exist_ok=True)
+        steps_dir.mkdir(parents=True, exist_ok=True)
+        artifact_manifest.update(
+            runs_dir=str(root.parent),
+            run_dir=str(root),
+            run_report_path=str(root / "README.md"),
+            timeline_path=str(root / "timeline.md"),
+            events_path=str(root / "events.jsonl"),
+            machine_dir=str(machine_dir),
+            run_metadata_path=str(machine_dir / "metadata.json"),
+            run_summary_path=str(machine_dir / "summary.json"),
+            artifact_manifest_path=str(machine_dir / "artifacts.json"),
+            steps_dir=str(steps_dir),
+        )
+        artifact_manifest["project_name"] = sanitized_name
     gate_enabled = (
         _clarification_gate_default()
         if clarification_gate_enabled is None

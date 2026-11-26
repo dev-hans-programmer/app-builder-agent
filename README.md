@@ -15,6 +15,10 @@ AI-powered agent that generates backend applications in both Python (FastAPI) an
   architecture tasks and a mandatory compliance report
 - 🤖 **Powered by OpenAI**
 - 🎯 **LangGraph orchestration**
+- 📨 **Durable queue execution** with RabbitMQ quorum queues, transactional outbox, leases, and
+  PostgreSQL checkpoints
+- 🌐 **FastAPI control plane** with 19 project/run/monitoring operations and replayable SSE logs
+- 🚚 **GitHub delivery** with collision-safe repository naming and idempotent generated-code commits
 
 ## Setup
 
@@ -22,6 +26,7 @@ AI-powered agent that generates backend applications in both Python (FastAPI) an
 
 - Python 3.11 or higher
 - An OpenAI API key
+- Docker with Compose for PostgreSQL, RabbitMQ, and Redis when using the API
 
 ### Installation
 
@@ -59,6 +64,10 @@ AI-powered agent that generates backend applications in both Python (FastAPI) an
 
    `--stack both` remains the default and runs both builders in parallel.
 
+
+RabbitMQ UI: http://127.0.0.1:15672
+Login: app_builder / app_builder
+
 ## Usage
 
 When you run the agent, you'll be prompted to:
@@ -75,6 +84,45 @@ repair behavior, and completion rules used by every run.
 Python runs always load `backend-prompt.md` before requirement analysis. To keep the policy in a
 different location, set `BACKEND_POLICY_PATH`; the selected file is hashed and copied into the
 project's `policy/` directory for reproducibility. Node.js-only runs do not load or apply it.
+
+## Durable API and workers
+
+```bash
+cp .env.example .env              # add OPENAI_API_KEY
+uv sync --all-extras
+make deps-up                      # PostgreSQL, RabbitMQ, Redis
+make db-migrate                   # async Alembic + LangGraph checkpoint schema
+```
+
+Run these in separate terminals:
+
+```bash
+make run-api
+make run-worker
+make run-beat
+```
+
+`make run-api` is the stable mode and does not reload when generated files are written under
+`data/`. For control-plane development, use `make run-api-dev`; its reloader watches only `src/`
+and has a bounded graceful-shutdown timeout for open SSE connections.
+
+Open `http://127.0.0.1:8080/docs`. PostgreSQL is the status/event source of truth; live run events
+are available at `/api/v1/runs/{run_id}/events/stream`. Generated files use local run-isolated
+storage under `data/`; no S3 dependency is required.
+
+To publish successful builds, configure `GITHUB_OWNER`, `GITHUB_TOKEN`, visibility, and commit author
+values in `.env`, then restart the worker. See [GitHub delivery](docs/github-delivery.md).
+Set `CONTROL_RETAIN_LOCAL_BUILDS=false` to remove `builds/` only after GitHub publishing succeeds;
+run/step/event metadata and readable diagnostics remain available.
+
+Architecture and contracts:
+
+- [End-to-end operations guide](docs/end-to-end-operations-guide.md)
+- [Control-plane architecture](docs/control-plane-architecture.md)
+- [API contracts](docs/control-plane-api-contracts.md)
+- [Data model](docs/control-plane-data-model.md)
+- [Data flow](docs/control-plane-data-flow.md)
+- [GitHub delivery](docs/github-delivery.md)
 
 ### Example
 
@@ -104,6 +152,7 @@ app-builder-agent/
 ├── src/
 │   ├── agents/          # Builder and comparison agents
 │   ├── graph/           # LangGraph workflow
+│   ├── control_plane/   # Async API, services, persistence, queue, and artifact adapters
 │   ├── observability/   # Run events, step artifacts, usage, and summaries
 │   ├── policy/          # Python backend policy loading and task section selection
 │   ├── prompts/         # Prompt templates
@@ -134,10 +183,8 @@ ruff check src/ tests/
 
 Implemented: stack-selective generation, approved acceptance artifacts, architecture/API/data
 contracts, Python production-policy enforcement, executable task generation, task-level patches,
-quality gates, bounded repair, traceability, checkpoints, and run observability.
-
-Planned next: queue-backed workers for durable long-running execution and external progress
-tracking.
+quality gates, bounded repair, traceability, checkpoints, run observability, durable queue workers,
+and the FastAPI control plane.
 
 ## License
 
